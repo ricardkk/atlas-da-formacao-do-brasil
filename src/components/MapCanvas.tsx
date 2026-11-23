@@ -496,7 +496,11 @@ export function MapCanvas({
 
       setActiveNote(null);
 
-      e.currentTarget.setPointerCapture(e.pointerId);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // noop: alguns navegadores/touchpads podem rejeitar setPointerCapture
+      }
       setIsDragging(true);
       dragOriginRef.current = {
         clientX: e.clientX,
@@ -510,18 +514,24 @@ export function MapCanvas({
 
   const handlePointerMove = useCallback(
     (e: ReactPointerEvent<SVGSVGElement>) => {
-      if (!isDragging || !dragOriginRef.current || !svgRef.current) return;
-      const rect = svgRef.current.getBoundingClientRect();
+      const origin = dragOriginRef.current;
+      const svgEl = svgRef.current;
+      if (!isDragging || !origin || !svgEl) return;
+
+      const rect = svgEl.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
+
       const scaleToViewBox = VIEWBOX_SIZE / Math.min(rect.width, rect.height);
-      const dx = (e.clientX - dragOriginRef.current.clientX) * scaleToViewBox;
-      const dy = (e.clientY - dragOriginRef.current.clientY) * scaleToViewBox;
+      const dx = (e.clientX - origin.clientX) * scaleToViewBox;
+      const dy = (e.clientY - origin.clientY) * scaleToViewBox;
+      const nextX = origin.startX + dx;
+      const nextY = origin.startY + dy;
 
       setTransform((prev) =>
         clampTransform({
           scale: prev.scale,
-          x: dragOriginRef.current!.startX + dx,
-          y: dragOriginRef.current!.startY + dy,
+          x: nextX,
+          y: nextY,
         })
       );
     },
@@ -530,9 +540,13 @@ export function MapCanvas({
 
   const handlePointerUp = useCallback(
     (e: ReactPointerEvent<SVGSVGElement>) => {
-      if (isDragging) {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-          e.currentTarget.releasePointerCapture(e.pointerId);
+      if (isDragging || dragOriginRef.current !== null) {
+        try {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+        } catch {
+          // noop: ignora NotFoundError / InvalidStateError ao liberar captura
         }
         setIsDragging(false);
         dragOriginRef.current = null;
@@ -621,6 +635,7 @@ export function MapCanvas({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onLostPointerCapture={handlePointerUp}
       >
         <defs>
           {/* Recorte (clip) com a silhueta completa do Brasil (27 UFs) */}
