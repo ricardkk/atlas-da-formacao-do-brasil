@@ -1,6 +1,7 @@
 import type {
   IndigenousTrunkId,
   LngLat,
+  StateCode,
   TerritorialSnapshotId,
 } from '../../types';
 
@@ -495,3 +496,98 @@ export const INDIGENOUS_REGIONS: readonly IndigenousRegionGeometry[] = [
     ],
   },
 ];
+
+/** Agrupamento de UFs atuais para fusão topológica das Províncias do Império em 1850 (sem o Acre). */
+export interface ImperialProvinceGroup {
+  readonly id: string;
+  readonly name: string;
+  readonly states: readonly StateCode[];
+}
+
+/**
+ * 19 Províncias históricas do Império do Brasil em 1850 (excluindo o Acre, incorporado em 1903).
+ * Usa fusão topológica (`topojson.merge`) para eliminar divisas criadas após 1850:
+ * Paraná (1853), Rondônia/Roraima/Amapá (1943), Distrito Federal (1960), Mato Grosso do Sul (1977)
+ * e Tocantins (1988).
+ */
+export const IMPERIAL_PROVINCE_GROUPS_1850: readonly ImperialProvinceGroup[] = [
+  { id: 'amazonas', name: 'Província do Amazonas (1850)', states: ['AM', 'RR'] },
+  { id: 'grao-para', name: 'Província do Grão-Pará', states: ['PA', 'AP'] },
+  { id: 'mato-grosso', name: 'Província de Mato Grosso', states: ['MT', 'MS', 'RO'] },
+  { id: 'goias', name: 'Província de Goiás', states: ['GO', 'TO', 'DF'] },
+  { id: 'sao-paulo', name: 'Província de São Paulo (inclui 5ª Comarca)', states: ['SP', 'PR'] },
+  { id: 'maranhao', name: 'Província do Maranhão', states: ['MA'] },
+  { id: 'piaui', name: 'Província do Piauí', states: ['PI'] },
+  { id: 'ceara', name: 'Província do Ceará', states: ['CE'] },
+  { id: 'rio-grande-do-norte', name: 'Província do Rio Grande do Norte', states: ['RN'] },
+  { id: 'paraiba', name: 'Província da Paraíba', states: ['PB'] },
+  { id: 'pernambuco', name: 'Província de Pernambuco', states: ['PE'] },
+  { id: 'alagoas', name: 'Província de Alagoas', states: ['AL'] },
+  { id: 'sergipe', name: 'Província de Sergipe', states: ['SE'] },
+  { id: 'bahia', name: 'Província da Bahia', states: ['BA'] },
+  { id: 'minas-gerais', name: 'Província de Minas Gerais', states: ['MG'] },
+  { id: 'espirito-santo', name: 'Província do Espírito Santo', states: ['ES'] },
+  { id: 'rio-de-janeiro', name: 'Província do Rio de Janeiro & Corte', states: ['RJ'] },
+  { id: 'santa-catarina', name: 'Província de Santa Catarina', states: ['SC'] },
+  { id: 'sao-pedro-rs', name: 'Província de São Pedro do Rio Grande do Sul', states: ['RS'] },
+];
+
+/** Anotação cartográfica contextual exibida como marcador "?" sobre o mapa. */
+export interface CartographicNote {
+  readonly id: string;
+  readonly snapshots: readonly TerritorialSnapshotId[];
+  readonly coordinates: LngLat;
+  readonly badgeLabel: string;
+  readonly title: string;
+  readonly explanation: string;
+}
+
+/** Notas cartográficas contextuais para esclarecer limites e anacronismos em cada recorte. */
+export const CARTOGRAPHIC_NOTES: readonly CartographicNote[] = [
+  {
+    id: 'note-tordesilhas-referencia',
+    snapshots: ['tordesilhas_1500', 'capitanias_1534'],
+    coordinates: [-48.7, -14.0],
+    badgeLabel: 'Nota Cartográfica · 1494/1534',
+    title: 'Meridiano de Tordesilhas e Contorno de Referência',
+    explanation:
+      'A linha de 1494 dividia o Novo Mundo entre Portugal e Castela, limitando a posse formal portuguesa à faixa oriental. O contorno atual do Brasil (sem o Acre) aparece ao fundo de forma suave apenas como referência geográfica para situar o leitor.',
+  },
+  {
+    id: 'note-madri-uti-possidetis',
+    snapshots: ['madri_1750'],
+    coordinates: [-60.5, -6.5],
+    badgeLabel: 'Tratado de Madri · 1750',
+    title: 'Fronteira do Uti Possidetis',
+    explanation:
+      'O Tratado de Madri substituiu a linha de Tordesilhas pelo princípio da posse efetiva (uti possidetis), reconhecendo a expansão bandeirante, missionária e amazônica que desenhou quase todo o contorno continental atual — ainda sem o Acre.',
+  },
+  {
+    id: 'note-acre-petropolis',
+    snapshots: ['madri_1750', 'imperio_1850'],
+    coordinates: [-70.1, -9.2],
+    badgeLabel: 'Acre · Fora do Território',
+    title: 'Território do Acre (incorporado em 1903)',
+    explanation:
+      'Até o início do século XX, o Acre pertencia à Bolívia (e antes ao domínio espanhol). Só foi incorporado ao Brasil pelo Tratado de Petrópolis (1903), após a migração de milhares de seringueiros nordestinos durante o Ciclo da Borracha.',
+  },
+  {
+    id: 'note-provincias-unidas-1850',
+    snapshots: ['imperio_1850'],
+    coordinates: [-49.8, -12.6],
+    badgeLabel: 'Divisão Provincial · 1850',
+    title: 'Províncias Unidas do Norte e Centro-Oeste',
+    explanation:
+      'Em 1850 ainda não existiam Tocantins (1988), Mato Grosso do Sul (1977), Rondônia (1943/1981), Roraima (1943/1988), Amapá (1943/1988) nem o Distrito Federal em Brasília (1960). Por isso, essas áreas aparecem fundidas às antigas províncias imperiais de Goiás, Mato Grosso, Grão-Pará e Amazonas.',
+  },
+  {
+    id: 'note-parana-sao-paulo-1850',
+    snapshots: ['imperio_1850'],
+    coordinates: [-51.3, -24.5],
+    badgeLabel: '5ª Comarca · 1850',
+    title: 'Paraná integrado à Província de São Paulo',
+    explanation:
+      'Em 1850, o território do atual estado do Paraná ainda fazia parte da Província de São Paulo como sua 5ª Comarca (Comarca de Curitiba). A emancipação da Província do Paraná ocorreu apenas em 1853.',
+  },
+];
+

@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -15,12 +16,15 @@ import type {
   Topology,
 } from 'topojson-specification';
 import type { Feature, FeatureCollection, Geometry } from 'geojson';
-import { Minus, Plus, RotateCcw } from 'lucide-react';
+import { Minus, Plus, RotateCcw, X } from 'lucide-react';
 import brazilStatesTopology from '../data/geo/brazil-states.json';
 import {
+  CARTOGRAPHIC_NOTES,
+  IMPERIAL_PROVINCE_GROUPS_1850,
   INDIGENOUS_REGIONS,
   MAJOR_RIVERS,
   TERRITORIAL_OVERLAYS,
+  type CartographicNote,
 } from '../data/geo/historical-layers';
 import {
   CONTINUITY_THREADS,
@@ -54,6 +58,8 @@ type BrazilTopology = Topology<{
   states: GeometryCollection<StateProperties>;
 }>;
 
+type StatePolygonGeom = Polygon<StateProperties> | MultiPolygon<StateProperties>;
+
 interface TransformState {
   readonly scale: number;
   readonly x: number;
@@ -62,6 +68,12 @@ interface TransformState {
 
 interface TooltipState {
   readonly event: HistoricalEvent;
+  readonly x: number;
+  readonly y: number;
+}
+
+interface ActiveNotePopup {
+  readonly note: CartographicNote;
   readonly x: number;
   readonly y: number;
 }
@@ -102,7 +114,6 @@ function createCurvedArcPath(
   if (dist < 1) return '';
   const mx = (x1 + x2) / 2;
   const my = (y1 + y2) / 2;
-  // Normal perpendicular consistente para dar arco elegante
   const nx = -dy / dist;
   const ny = dx / dist;
   const offset = Math.min(95, dist * curvature);
@@ -155,7 +166,28 @@ export function MapCanvas({
   } | null>(null);
 
   const [hoveredState, setHoveredState] = useState<StateProperties | null>(null);
+  const [hoveredProvinceName, setHoveredProvinceName] = useState<string | null>(
+    null
+  );
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [activeNote, setActiveNote] = useState<ActiveNotePopup | null>(null);
+
+  // Fecha o popup contextual "?" ao trocar de recorte territorial ou desativar a camada
+  useEffect(() => {
+    setActiveNote(null);
+    setHoveredProvinceName(null);
+  }, [layers.activeTerritorialSnapshot, layers.showTerritorialOverlay]);
+
+  // Classificação do recorte territorial ativo
+  const isOverlayActive = layers.showTerritorialOverlay;
+  const activeSnapshot = layers.activeTerritorialSnapshot;
+  const isPre1903 = isOverlayActive && activeSnapshot !== 'republica_1889';
+  const isColonial =
+    isOverlayActive &&
+    (activeSnapshot === 'tordesilhas_1500' ||
+      activeSnapshot === 'capitanias_1534' ||
+      activeSnapshot === 'madri_1750');
+  const isImperial = isOverlayActive && activeSnapshot === 'imperio_1850';
 
   // Mapa rápido UF -> Brasil de Darcy Ribeiro
   const brasilByState = useMemo(() => {
@@ -168,19 +200,19 @@ export function MapCanvas({
     return map;
   }, []);
 
-  // Construção estática da malha do Brasil e projeção Mercator centrada
+  // Construção estática da malha do Brasil, silhueta pré-1903 e províncias imperiais fundidas
   const geo = useMemo(() => {
     const topo = brazilStatesTopology as unknown as BrazilTopology;
+    const allGeoms = topo.objects.states.geometries as StatePolygonGeom[];
+    const nonAcreGeoms = allGeoms.filter((g) => g.properties?.sigla !== 'AC');
+
     const statesFc = feature(
       topo,
       topo.objects.states
     ) as unknown as FeatureCollection<Geometry, StateProperties>;
-    const brazilOutline = merge(
-      topo,
-      topo.objects.states.geometries as Array<
-        Polygon<StateProperties> | MultiPolygon<StateProperties>
-      >
-    );
+
+    const brazilOutline = merge(topo, allGeoms);
+    const brazilPre1903Outline = merge(topo, nonAcreGeoms);
     const internalBorders = mesh(
       topo,
       topo.objects.states,
@@ -205,13 +237,35 @@ export function MapCanvas({
       })
     );
 
+    const acreState =
+      states.find((s) => s.properties.sigla === 'AC') ?? null;
+
+    // Fusão topológica das 19 províncias imperiais de 1850 (sem AC e sem bordas pós-1850)
+    const imperialProvinces1850 = IMPERIAL_PROVINCE_GROUPS_1850.map((group) => {
+      const groupGeoms = allGeoms.filter(
+        (g) =>
+          g.properties?.sigla !== undefined &&
+          group.states.includes(g.properties.sigla)
+      );
+      const mergedGeom = merge(topo, groupGeoms);
+      return {
+        id: group.id,
+        name: group.name,
+        states: group.states,
+        d: pathGen(mergedGeom) ?? '',
+      };
+    });
+
     return {
       projection,
       pathGen,
       graticulePath,
       outlinePath: pathGen(brazilOutline) ?? '',
+      outlinePre1903Path: pathGen(brazilPre1903Outline) ?? '',
       internalBordersPath: pathGen(internalBorders) ?? '',
       states,
+      acreState,
+      imperialProvinces1850,
     };
   }, []);
 
@@ -235,13 +289,20 @@ export function MapCanvas({
   // Recorte territorial ativo
   const activeSnapshotMeta = useMemo(
     () =>
-      TERRITORIAL_SNAPSHOTS.find(
-        (s) => s.id === layers.activeTerritorialSnapshot
-      ) ?? TERRITORIAL_SNAPSHOTS[0],
-    [layers.activeTerritorialSnapshot]
+      TERRITORIAL_SNAPSHOTS.find((s) => s.id === activeSnapshot) ??
+      TERRITORIAL_SNAPSHOTS[0],
+    [activeSnapshot]
   );
 
-  const activeOverlay = TERRITORIAL_OVERLAYS[layers.activeTerritorialSnapshot];
+  const activeOverlay = TERRITORIAL_OVERLAYS[activeSnapshot];
+
+  // Notas cartográficas "?" visíveis para o recorte atual
+  const visibleNotes = useMemo(() => {
+    if (!isOverlayActive) return [];
+    return CARTOGRAPHIC_NOTES.filter((note) =>
+      note.snapshots.includes(activeSnapshot)
+    );
+  }, [isOverlayActive, activeSnapshot]);
 
   // Zoom por botão (centrado no centro do viewBox)
   const applyZoomFactor = useCallback((factor: number) => {
@@ -285,9 +346,11 @@ export function MapCanvas({
   const handlePointerDown = useCallback(
     (e: ReactPointerEvent<SVGSVGElement>) => {
       if (e.button !== 0) return;
-      // Não iniciar drag se clicou em um marcador de evento
       const target = e.target as Element | null;
       if (target?.closest('[data-map-interactive="true"]')) return;
+
+      // Fecha popup contextual ao clicar fora no mapa
+      setActiveNote(null);
 
       e.currentTarget.setPointerCapture(e.pointerId);
       setIsDragging(true);
@@ -348,28 +411,44 @@ export function MapCanvas({
     []
   );
 
+  const openNotePopup = useCallback(
+    (note: CartographicNote, clientX?: number, clientY?: number) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      if (clientX !== undefined && clientY !== undefined) {
+        setActiveNote((prev) =>
+          prev?.note.id === note.id
+            ? null
+            : {
+                note,
+                x: clientX - rect.left,
+                y: clientY - rect.top,
+              }
+        );
+      } else {
+        // Fallback para acionamento por teclado: posiciona próximo ao centro
+        setActiveNote((prev) =>
+          prev?.note.id === note.id
+            ? null
+            : {
+                note,
+                x: rect.width * 0.5,
+                y: rect.height * 0.42,
+              }
+        );
+      }
+    },
+    []
+  );
+
   // Escala inversa suave para marcadores e textos permanecerem legíveis no zoom
   const markerInvScale = 1 / Math.sqrt(transform.scale);
 
-  // Cor das divisas internas conforme o recorte territorial ativo
-  const internalBorderStroke = useMemo(() => {
-    if (!layers.showTerritorialOverlay) return '#C5BA9F';
-    switch (layers.activeTerritorialSnapshot) {
-      case 'imperio_1850':
-        return '#2B4570';
-      case 'republica_1889':
-        return '#2F5D50';
-      default:
-        return '#CFC4AA';
-    }
-  }, [layers.showTerritorialOverlay, layers.activeTerritorialSnapshot]);
-
-  const internalBorderOpacity =
-    layers.showTerritorialOverlay &&
-    (layers.activeTerritorialSnapshot === 'tordesilhas_1500' ||
-      layers.activeTerritorialSnapshot === 'capitanias_1534')
-      ? 0.35
-      : 0.72;
+  // Clip ativo conforme recorte temporal (sem AC antes de 1903)
+  const activeLandClipUrl = isPre1903
+    ? 'url(#brazil-pre1903-clip)'
+    : 'url(#brazil-land-clip)';
 
   return (
     <div
@@ -434,9 +513,14 @@ export function MapCanvas({
             />
           </filter>
 
-          {/* Recorte (clip) com a silhueta oficial do Brasil */}
+          {/* Recorte (clip) com a silhueta completa do Brasil (27 UFs) */}
           <clipPath id="brazil-land-clip">
             <path d={geo.outlinePath} />
+          </clipPath>
+
+          {/* Recorte (clip) pré-1903 (26 UFs, excluindo o Acre) */}
+          <clipPath id="brazil-pre1903-clip">
+            <path d={geo.outlinePre1903Path} />
           </clipPath>
 
           {/* Padrões SVG editoriais para as 4 Matrizes Indígenas */}
@@ -504,11 +588,7 @@ export function MapCanvas({
         </defs>
 
         {/* Fundo papel pergaminho + textura */}
-        <rect
-          width={VIEWBOX_SIZE}
-          height={VIEWBOX_SIZE}
-          fill="#F7F3E9"
-        />
+        <rect width={VIEWBOX_SIZE} height={VIEWBOX_SIZE} fill="#F7F3E9" />
         <rect
           width={VIEWBOX_SIZE}
           height={VIEWBOX_SIZE}
@@ -538,57 +618,147 @@ export function MapCanvas({
             </g>
           )}
 
-          {/* CAMADA 2: Silhueta base do Brasil + Malha dos 27 estados */}
-          <g filter="url(#land-shadow)">
+          {/* CAMADA 2: Território Base — varia com rigor histórico conforme o recorte */}
+          {/* 2A. Contorno de referência do Acre (AC) fora do Brasil antes de 1903 */}
+          {isPre1903 && geo.acreState && (
             <path
-              d={geo.outlinePath}
-              fill="#EFE9DA"
-              stroke="#B7AA8E"
-              strokeWidth={1.25 / transform.scale}
+              d={geo.acreState.d}
+              fill="#F7F3E9"
+              fillOpacity={0.6}
+              stroke="#9B9079"
+              strokeWidth={1.1 / transform.scale}
+              strokeDasharray="4 3"
+              className="transition-all duration-300"
+              onMouseEnter={() => {
+                setHoveredState(null);
+                setHoveredProvinceName(
+                  'Território do Acre (Bolívia até 1903)'
+                );
+              }}
+              onMouseLeave={() => setHoveredProvinceName(null)}
             />
-          </g>
+          )}
 
-          <g>
-            {geo.states.map(({ properties, d }) => {
-              const isHovered = hoveredState?.sigla === properties.sigla;
-              const brasil = brasilByState.get(properties.sigla);
-              const isBrasilSelected =
-                layers.showDarcyBrasis &&
-                selectedBrasilId !== null &&
-                brasil?.id === selectedBrasilId;
+          {/* 2B. Modo Colônia (1500, 1534, 1750): silhueta pré-1903 translúcida como referência espacial, sem UFs modernas */}
+          {isColonial && (
+            <g filter="url(#land-shadow)">
+              <path
+                d={geo.outlinePre1903Path}
+                fill="#EFE9DA"
+                fillOpacity={activeSnapshot === 'madri_1750' ? 0.78 : 0.56}
+                stroke="#B7AA8E"
+                strokeWidth={1.15 / transform.scale}
+                strokeDasharray={
+                  activeSnapshot === 'madri_1750' ? undefined : '4 3'
+                }
+                className="transition-all duration-300"
+              />
+            </g>
+          )}
 
-              return (
+          {/* 2C. Modo Império (1850): 19 Províncias Imperiais unificadas via topojson.merge (sem AC e sem divisas pós-1850) */}
+          {isImperial && (
+            <g>
+              <g filter="url(#land-shadow)">
                 <path
-                  key={properties.sigla}
-                  d={d}
-                  fill={isHovered ? '#E7DEC9' : '#EFE9DA'}
-                  stroke={
-                    isBrasilSelected
-                      ? brasil?.color ?? '#1E242B'
-                      : isHovered
-                        ? '#555B61'
-                        : 'none'
-                  }
-                  strokeWidth={(isBrasilSelected ? 1.5 : 1) / transform.scale}
-                  className="transition-colors duration-150 cursor-pointer"
-                  onMouseEnter={() => setHoveredState(properties)}
-                  onMouseLeave={() =>
-                    setHoveredState((prev) =>
-                      prev?.sigla === properties.sigla ? null : prev
-                    )
-                  }
-                  onClick={() => {
-                    if (layers.showDarcyBrasis && brasil && onSelectBrasil) {
-                      onSelectBrasil(brasil.id);
-                    }
-                    onSelectState?.(properties.sigla);
-                  }}
+                  d={geo.outlinePre1903Path}
+                  fill="#EFE9DA"
+                  stroke="#2B4570"
+                  strokeWidth={1.4 / transform.scale}
                 />
-              );
-            })}
-          </g>
+              </g>
+              {geo.imperialProvinces1850.map((prov) => {
+                const isHovered = hoveredProvinceName === prov.name;
+                return (
+                  <path
+                    key={prov.id}
+                    d={prov.d}
+                    fill={isHovered ? '#E5DCC6' : '#EFE9DA'}
+                    stroke="#2B4570"
+                    strokeWidth={(isHovered ? 1.35 : 0.9) / transform.scale}
+                    strokeOpacity={isHovered ? 0.95 : 0.65}
+                    className="transition-colors duration-150 cursor-pointer"
+                    onMouseEnter={() => {
+                      setHoveredState(null);
+                      setHoveredProvinceName(prov.name);
+                    }}
+                    onMouseLeave={() =>
+                      setHoveredProvinceName((prev) =>
+                        prev === prov.name ? null : prev
+                      )
+                    }
+                    onClick={() => {
+                      const firstUf = prov.states[0];
+                      const brasil = firstUf
+                        ? brasilByState.get(firstUf)
+                        : undefined;
+                      if (layers.showDarcyBrasis && brasil && onSelectBrasil) {
+                        onSelectBrasil(brasil.id);
+                      }
+                      if (firstUf) onSelectState?.(firstUf);
+                    }}
+                  />
+                );
+              })}
+            </g>
+          )}
 
-          {/* CAMADA 3: Coroplético dos 5 Brasis de Darcy Ribeiro */}
+          {/* 2D. Modo República (1889–atual) ou sem recorte territorial: malha completa das 27 UFs */}
+          {!isColonial && !isImperial && (
+            <g>
+              <g filter="url(#land-shadow)">
+                <path
+                  d={geo.outlinePath}
+                  fill="#EFE9DA"
+                  stroke="#B7AA8E"
+                  strokeWidth={1.25 / transform.scale}
+                />
+              </g>
+
+              {geo.states.map(({ properties, d }) => {
+                const isHovered = hoveredState?.sigla === properties.sigla;
+                const brasil = brasilByState.get(properties.sigla);
+                const isBrasilSelected =
+                  layers.showDarcyBrasis &&
+                  selectedBrasilId !== null &&
+                  brasil?.id === selectedBrasilId;
+
+                return (
+                  <path
+                    key={properties.sigla}
+                    d={d}
+                    fill={isHovered ? '#E7DEC9' : '#EFE9DA'}
+                    stroke={
+                      isBrasilSelected
+                        ? brasil?.color ?? '#1E242B'
+                        : isHovered
+                          ? '#555B61'
+                          : 'none'
+                    }
+                    strokeWidth={(isBrasilSelected ? 1.5 : 1) / transform.scale}
+                    className="transition-colors duration-150 cursor-pointer"
+                    onMouseEnter={() => {
+                      setHoveredProvinceName(null);
+                      setHoveredState(properties);
+                    }}
+                    onMouseLeave={() =>
+                      setHoveredState((prev) =>
+                        prev?.sigla === properties.sigla ? null : prev
+                      )
+                    }
+                    onClick={() => {
+                      if (layers.showDarcyBrasis && brasil && onSelectBrasil) {
+                        onSelectBrasil(brasil.id);
+                      }
+                      onSelectState?.(properties.sigla);
+                    }}
+                  />
+                );
+              })}
+            </g>
+          )}
+
+          {/* CAMADA 3: Coroplético dos 5 Brasis de Darcy Ribeiro (exclui AC antes de 1903) */}
           {layers.showDarcyBrasis && (
             <g
               style={{ mixBlendMode: 'multiply' }}
@@ -596,6 +766,7 @@ export function MapCanvas({
               pointerEvents="none"
             >
               {geo.states.map(({ properties, d }) => {
+                if (isPre1903 && properties.sigla === 'AC') return null;
                 const brasil = brasilByState.get(properties.sigla);
                 if (!brasil) return null;
                 const isSelected = selectedBrasilId === brasil.id;
@@ -622,7 +793,7 @@ export function MapCanvas({
           {/* CAMADA 4: Matrizes Indígenas com padrões SVG + multiply */}
           {layers.showIndigenousMatrices && (
             <g
-              clipPath="url(#brazil-land-clip)"
+              clipPath={activeLandClipUrl}
               style={{ mixBlendMode: 'multiply' }}
               className="transition-opacity duration-300"
               pointerEvents="none"
@@ -660,28 +831,18 @@ export function MapCanvas({
             </g>
           )}
 
-          {/* Divisas interestaduais / provinciais */}
-          <path
-            d={geo.internalBordersPath}
-            fill="none"
-            stroke={internalBorderStroke}
-            strokeWidth={
-              (layers.showTerritorialOverlay &&
-              (layers.activeTerritorialSnapshot === 'imperio_1850' ||
-                layers.activeTerritorialSnapshot === 'republica_1889')
-                ? 1.05
-                : 0.75) / transform.scale
-            }
-            strokeOpacity={internalBorderOpacity}
-            strokeDasharray={
-              layers.showTerritorialOverlay &&
-              layers.activeTerritorialSnapshot === 'imperio_1850'
-                ? '4 2'
-                : undefined
-            }
-            pointerEvents="none"
-            className="transition-all duration-300"
-          />
+          {/* Divisas interestaduais modernas (exibidas apenas na República ou sem recorte histórico) */}
+          {!isColonial && !isImperial && (
+            <path
+              d={geo.internalBordersPath}
+              fill="none"
+              stroke={isOverlayActive ? '#2F5D50' : '#C5BA9F'}
+              strokeWidth={(isOverlayActive ? 1.0 : 0.75) / transform.scale}
+              strokeOpacity={0.72}
+              pointerEvents="none"
+              className="transition-all duration-300"
+            />
+          )}
 
           {/* CAMADA 5: Grandes Rios */}
           {layers.showRivers && (
@@ -727,26 +888,33 @@ export function MapCanvas({
           )}
 
           {/* CAMADA 6: Recorte Territorial Histórico */}
-          {layers.showTerritorialOverlay && activeOverlay && (
+          {isOverlayActive && activeOverlay && (
             <g
               key={activeOverlay.id}
               className="transition-opacity duration-300"
               pointerEvents="none"
             >
-              {/* Áreas clipadas à silhueta do Brasil */}
-              <g clipPath="url(#brazil-land-clip)">
+              {/* Áreas clipadas à silhueta válida do período (sem AC antes de 1903) */}
+              <g clipPath={activeLandClipUrl}>
                 {activeOverlay.highlightArea && (
                   <path
                     d={geo.pathGen(toPolygon(activeOverlay.highlightArea)) ?? ''}
                     fill={activeSnapshotMeta.color}
-                    fillOpacity={0.13}
+                    fillOpacity={0.22}
                   />
                 )}
                 {activeOverlay.spanishArea && (
                   <path
                     d={geo.pathGen(toPolygon(activeOverlay.spanishArea)) ?? ''}
                     fill="#1E242B"
-                    fillOpacity={0.07}
+                    fillOpacity={0.05}
+                  />
+                )}
+                {activeSnapshot === 'madri_1750' && (
+                  <path
+                    d={geo.outlinePre1903Path}
+                    fill="#8F3E28"
+                    fillOpacity={0.11}
                   />
                 )}
                 {activeOverlay.capitanias?.map((cap, idx) => {
@@ -766,10 +934,10 @@ export function MapCanvas({
                       <path
                         d={d}
                         fill={idx % 2 === 0 ? '#B85336' : '#C68B2C'}
-                        fillOpacity={0.11}
+                        fillOpacity={0.18}
                         stroke="#A1462C"
-                        strokeWidth={0.85 / transform.scale}
-                        strokeOpacity={0.65}
+                        strokeWidth={0.95 / transform.scale}
+                        strokeOpacity={0.72}
                       />
                       {labelPt && (
                         <text
@@ -800,7 +968,7 @@ export function MapCanvas({
                   stroke="#B85336"
                   strokeWidth={1.25 / transform.scale}
                   strokeDasharray="4 5"
-                  strokeOpacity={0.5}
+                  strokeOpacity={0.52}
                 />
               )}
 
@@ -812,9 +980,9 @@ export function MapCanvas({
                   }
                   fill="none"
                   stroke="#B85336"
-                  strokeWidth={2.2 / Math.sqrt(transform.scale)}
+                  strokeWidth={2.3 / Math.sqrt(transform.scale)}
                   strokeDasharray="7 4"
-                  strokeOpacity={0.9}
+                  strokeOpacity={0.92}
                 />
               )}
 
@@ -824,10 +992,10 @@ export function MapCanvas({
                   d={geo.pathGen(toLineString(activeOverlay.borderLine)) ?? ''}
                   fill="none"
                   stroke="#8F3E28"
-                  strokeWidth={2.5 / Math.sqrt(transform.scale)}
+                  strokeWidth={2.6 / Math.sqrt(transform.scale)}
                   strokeDasharray="8 3 2 3"
                   strokeLinecap="round"
-                  strokeOpacity={0.9}
+                  strokeOpacity={0.92}
                 />
               )}
 
@@ -1026,7 +1194,8 @@ export function MapCanvas({
                 const eraColor = ERAS[event.era].color;
                 const isSelected = selectedEventId === event.id;
                 const isHovered = tooltip?.event.id === event.id;
-                const radius = (isSelected ? 14 : isHovered ? 12.5 : 11) * markerInvScale;
+                const radius =
+                  (isSelected ? 14 : isHovered ? 12.5 : 11) * markerInvScale;
 
                 return (
                   <g
@@ -1039,11 +1208,13 @@ export function MapCanvas({
                     className="cursor-pointer focus:outline-none"
                     onClick={(e) => {
                       e.stopPropagation();
+                      setActiveNote(null);
                       onSelectEvent(event.id);
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
+                        setActiveNote(null);
                         onSelectEvent(event.id);
                       }
                     }}
@@ -1059,7 +1230,6 @@ export function MapCanvas({
                       )
                     }
                   >
-                    {/* Anel de destaque quando selecionado */}
                     {isSelected && (
                       <>
                         <circle
@@ -1079,7 +1249,6 @@ export function MapCanvas({
                       </>
                     )}
 
-                    {/* Medalhão do marcador */}
                     <circle
                       r={radius}
                       fill={eraColor}
@@ -1088,7 +1257,6 @@ export function MapCanvas({
                       className="transition-all duration-150"
                     />
 
-                    {/* Símbolo cartográfico temático */}
                     <g
                       transform={`translate(${-6.5 * markerInvScale}, ${
                         -6.5 * markerInvScale
@@ -1099,7 +1267,6 @@ export function MapCanvas({
                       <MapSymbol symbol={event.symbol} size={13} />
                     </g>
 
-                    {/* Rótulo discreto do ano sob o marcador quando selecionado ou em zoom alto */}
                     {(isSelected || transform.scale >= 1.75) && (
                       <text
                         y={radius + 11 * markerInvScale}
@@ -1116,6 +1283,69 @@ export function MapCanvas({
                         {event.year}
                       </text>
                     )}
+                  </g>
+                );
+              })}
+            </g>
+          )}
+
+          {/* CAMADA 9: Marcadores contextuais "?" de notas cartográficas */}
+          {visibleNotes.length > 0 && (
+            <g>
+              {visibleNotes.map((note) => {
+                const pt = projectPoint(note.coordinates);
+                if (!pt) return null;
+                const isOpen = activeNote?.note.id === note.id;
+                const r = (isOpen ? 10 : 8.5) * markerInvScale;
+
+                return (
+                  <g
+                    key={note.id}
+                    data-map-interactive="true"
+                    transform={`translate(${pt[0]}, ${pt[1]})`}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Nota cartográfica: ${note.title}`}
+                    aria-expanded={isOpen}
+                    className="cursor-pointer focus:outline-none"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openNotePopup(note, e.clientX, e.clientY);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openNotePopup(note);
+                      }
+                    }}
+                  >
+                    {isOpen && (
+                      <circle
+                        r={r + 4 * markerInvScale}
+                        fill="#C68B2C"
+                        fillOpacity={0.18}
+                        stroke="#C68B2C"
+                        strokeWidth={1.1 * markerInvScale}
+                        strokeDasharray="2 2"
+                      />
+                    )}
+                    <circle
+                      r={r}
+                      fill={isOpen ? '#C68B2C' : '#F7F3E9'}
+                      stroke="#C68B2C"
+                      strokeWidth={1.6 * markerInvScale}
+                    />
+                    <text
+                      y={3.4 * markerInvScale}
+                      textAnchor="middle"
+                      fontSize={10.5 * markerInvScale}
+                      fontFamily="var(--font-serif)"
+                      fontWeight={700}
+                      fill={isOpen ? '#F7F3E9' : '#8A5B14'}
+                      pointerEvents="none"
+                    >
+                      ?
+                    </text>
                   </g>
                 );
               })}
@@ -1148,15 +1378,29 @@ export function MapCanvas({
             strokeWidth="0.7"
             strokeDasharray="2 2"
           />
-          {/* Estrela principal N-S-L-O */}
           <polygon points="0,-20 3.5,-3.5 0,0" fill="#1E242B" />
           <polygon points="0,-20 -3.5,-3.5 0,0" fill="#B85336" />
-          <polygon points="0,20 3.5,3.5 0,0" fill="#DCD3BE" stroke="#555B61" strokeWidth="0.5" />
+          <polygon
+            points="0,20 3.5,3.5 0,0"
+            fill="#DCD3BE"
+            stroke="#555B61"
+            strokeWidth="0.5"
+          />
           <polygon points="0,20 -3.5,3.5 0,0" fill="#555B61" />
           <polygon points="20,0 3.5,3.5 0,0" fill="#555B61" />
-          <polygon points="20,0 3.5,-3.5 0,0" fill="#DCD3BE" stroke="#555B61" strokeWidth="0.5" />
+          <polygon
+            points="20,0 3.5,-3.5 0,0"
+            fill="#DCD3BE"
+            stroke="#555B61"
+            strokeWidth="0.5"
+          />
           <polygon points="-20,0 -3.5,-3.5 0,0" fill="#555B61" />
-          <polygon points="-20,0 -3.5,3.5 0,0" fill="#DCD3BE" stroke="#555B61" strokeWidth="0.5" />
+          <polygon
+            points="-20,0 -3.5,3.5 0,0"
+            fill="#DCD3BE"
+            stroke="#555B61"
+            strokeWidth="0.5"
+          />
           <text
             x="0"
             y="-29"
@@ -1202,27 +1446,52 @@ export function MapCanvas({
       </svg>
 
       {/* Cartela Cartográfica Editorial (canto superior esquerdo) */}
-      <div className="pointer-events-none absolute top-4 left-4 max-w-xs rounded border border-parchment-border bg-parchment/90 px-3.5 py-2.5 shadow-sm backdrop-blur-sm">
+      <div className="pointer-events-none absolute top-4 left-4 max-w-xs rounded border border-parchment-border bg-parchment/92 px-3.5 py-2.5 shadow-sm backdrop-blur-sm">
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
           Carta Histórica · Projeção Mercator
         </p>
         <p className="font-serif text-base font-semibold leading-tight text-ink mt-0.5">
-          {layers.showTerritorialOverlay
+          {isOverlayActive
             ? activeSnapshotMeta.label
             : 'Território Brasileiro (27 UFs)'}
         </p>
-        {hoveredState && (
+
+        {hoveredProvinceName && (
+          <p className="mt-1 text-xs text-ink-muted">
+            <span className="font-semibold text-ink">
+              {hoveredProvinceName}
+            </span>
+          </p>
+        )}
+
+        {!hoveredProvinceName && hoveredState && (
           <p className="mt-1 text-xs text-ink-muted">
             UF:{' '}
             <span className="font-semibold text-ink">
               {hoveredState.nome} ({hoveredState.sigla})
             </span>
-            {layers.showDarcyBrasis && brasilByState.get(hoveredState.sigla) && (
-              <span>
-                {' '}
-                · {brasilByState.get(hoveredState.sigla)?.name}
-              </span>
-            )}
+            {layers.showDarcyBrasis &&
+              brasilByState.get(hoveredState.sigla) && (
+                <span> · {brasilByState.get(hoveredState.sigla)?.name}</span>
+              )}
+          </p>
+        )}
+
+        {isColonial && (
+          <p className="mt-1.5 pt-1.5 border-t border-parchment-border/80 text-[11px] italic text-ink-muted leading-snug">
+            Contorno atual (sem o Acre) exibido apenas como referência
+            geográfica. Clique nos selos{' '}
+            <span className="font-serif font-bold not-italic text-ochre">?</span>{' '}
+            para detalhes.
+          </p>
+        )}
+
+        {isImperial && (
+          <p className="mt-1.5 pt-1.5 border-t border-parchment-border/80 text-[11px] italic text-ink-muted leading-snug">
+            Províncias imperiais unificadas (1850); Acre em tracejado (Bolívia
+            até 1903). Clique nos selos{' '}
+            <span className="font-serif font-bold not-italic text-ochre">?</span>{' '}
+            para detalhes.
           </p>
         )}
       </div>
@@ -1258,6 +1527,52 @@ export function MapCanvas({
           <RotateCcw className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {/* Popup Editorial de Nota Cartográfica "?" */}
+      {activeNote && (
+        <div
+          role="dialog"
+          aria-label={activeNote.note.title}
+          className="absolute z-30 w-80 max-w-[calc(100%-2rem)] rounded-lg border border-ochre/50 bg-parchment/98 p-4 shadow-xl backdrop-blur-sm"
+          style={{
+            left: Math.max(
+              16,
+              Math.min(
+                activeNote.x + 14,
+                (containerRef.current?.clientWidth ?? 800) - 336
+              )
+            ),
+            top: Math.max(
+              16,
+              Math.min(
+                activeNote.y - 24,
+                (containerRef.current?.clientHeight ?? 600) - 210
+              )
+            ),
+          }}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-ochre/35 bg-ochre/12 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink">
+              <span className="font-serif font-bold text-ochre">?</span>
+              {activeNote.note.badgeLabel}
+            </span>
+            <button
+              type="button"
+              onClick={() => setActiveNote(null)}
+              className="rounded p-1 text-ink-muted hover:bg-parchment-surface hover:text-ink transition-colors"
+              aria-label="Fechar nota cartográfica"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <h3 className="font-serif text-lg font-semibold leading-snug text-ink mt-2">
+            {activeNote.note.title}
+          </h3>
+          <p className="font-sans text-xs text-ink-muted leading-relaxed mt-1.5">
+            {activeNote.note.explanation}
+          </p>
+        </div>
+      )}
 
       {/* Tooltip editorial flutuante para eventos históricos */}
       {tooltip && (
