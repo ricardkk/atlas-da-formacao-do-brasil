@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { geoGraticule, geoMercator, geoPath } from 'd3-geo';
 import { feature, merge, mesh } from 'topojson-client';
@@ -47,6 +46,7 @@ import { MapSymbol } from './MapSymbols';
 const VIEWBOX_SIZE = 900;
 const MIN_SCALE = 0.85;
 const MAX_SCALE = 4.0;
+const DEFAULT_TRANSFORM: TransformState = { scale: 1, x: 0, y: 0 };
 
 interface StateProperties {
   readonly sigla: StateCode;
@@ -91,8 +91,15 @@ export interface MapCanvasProps {
   readonly onClearSelection?: () => void;
 }
 
-/** Limita a translação para manter o Brasil sempre acessível dentro do viewport. */
+/** Limita a translação e garante finitude numérica para manter o Brasil sempre visível e estável. */
 function clampTransform(next: TransformState): TransformState {
+  if (
+    !Number.isFinite(next.scale) ||
+    !Number.isFinite(next.x) ||
+    !Number.isFinite(next.y)
+  ) {
+    return DEFAULT_TRANSFORM;
+  }
   const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, next.scale));
   const maxOffset = VIEWBOX_SIZE * 0.45 * scale;
   const x = Math.min(maxOffset, Math.max(-maxOffset, next.x));
@@ -152,11 +159,7 @@ export function MapCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  const [transform, setTransform] = useState<TransformState>({
-    scale: 1,
-    x: 0,
-    y: 0,
-  });
+  const [transform, setTransform] = useState<TransformState>(DEFAULT_TRANSFORM);
   const [isDragging, setIsDragging] = useState(false);
   const dragOriginRef = useRef<{
     clientX: number;
@@ -164,6 +167,10 @@ export function MapCanvas({
     startX: number;
     startY: number;
   } | null>(null);
+
+  // Refs para throttling de zoom via requestAnimationFrame
+  const pendingZoomFactorRef = useRef<number>(1);
+  const zoomRafIdRef = useRef<number | null>(null);
 
   const [hoveredState, setHoveredState] = useState<StateProperties | null>(null);
   const [hoveredProvinceName, setHoveredProvinceName] = useState<string | null>(
@@ -177,6 +184,54 @@ export function MapCanvas({
     setActiveNote(null);
     setHoveredProvinceName(null);
   }, [layers.activeTerritorialSnapshot, layers.showTerritorialOverlay]);
+
+  // Listener nativo de wheel com { passive: false } + throttling por requestAnimationFrame
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      // Normaliza deltaY para evitar saltos bruscos em trackpads ou mouses de alta frequência
+      const normalizedDelta = Math.max(-120, Math.min(120, e.deltaY));
+      if (normalizedDelta === 0) return;
+
+      const stepFactor = Math.exp(-normalizedDelta * 0.0014);
+      pendingZoomFactorRef.current *= stepFactor;
+
+      if (zoomRafIdRef.current === null) {
+        zoomRafIdRef.current = window.requestAnimationFrame(() => {
+          zoomRafIdRef.current = null;
+          const factor = pendingZoomFactorRef.current;
+          pendingZoomFactorRef.current = 1;
+          if (!Number.isFinite(factor) || Math.abs(factor - 1) < 1e-4) return;
+
+          setTransform((prev) => {
+            const nextScale = Math.min(
+              MAX_SCALE,
+              Math.max(MIN_SCALE, prev.scale * factor)
+            );
+            const ratio = prev.scale > 0 ? nextScale / prev.scale : 1;
+            return clampTransform({
+              scale: nextScale,
+              x: prev.x * ratio,
+              y: prev.y * ratio,
+            });
+          });
+        });
+      }
+    };
+
+    svgEl.addEventListener('wheel', handleNativeWheel, { passive: false });
+    return () => {
+      svgEl.removeEventListener('wheel', handleNativeWheel);
+      if (zoomRafIdRef.current !== null) {
+        window.cancelAnimationFrame(zoomRafIdRef.current);
+        zoomRafIdRef.current = null;
+      }
+      pendingZoomFactorRef.current = 1;
+    };
+  }, []);
 
   // Classificação do recorte territorial ativo
   const isOverlayActive = layers.showTerritorialOverlay;
@@ -200,7 +255,7 @@ export function MapCanvas({
     return map;
   }, []);
 
-  // Construção estática da malha do Brasil, silhueta pré-1903 e províncias imperiais fundidas
+  // Construção estática da malha do Brasil, silhueta pré-1903, províncias imperiais e camadas fixas
   const geo = useMemo(() => {
     const topo = brazilStatesTopology as unknown as BrazilTopology;
     const allGeoms = topo.objects.states.geometries as StatePolygonGeom[];
@@ -229,11 +284,15 @@ export function MapCanvas({
     const pathGen = geoPath(projection);
     const graticulePath = pathGen(geoGraticule().step([5, 5])()) ?? '';
 
+    const project = (coord: LngLat): readonly [number, number] | null => {
+      const pt = projection([coord[0], coord[1]]);
+      return pt ? [pt[0], pt[1]] : null;
+    };
+
     const states = statesFc.features.map(
       (feat: Feature<Geometry, StateProperties>) => ({
         properties: feat.properties,
         d: pathGen(feat) ?? '',
-        centroid: pathGen.centroid(feat),
       })
     );
 
@@ -256,9 +315,36 @@ export function MapCanvas({
       };
     });
 
+    // Pré-projeção dos Grandes Rios (evita recalcular D3 durante zoom/pan)
+    const rivers = MAJOR_RIVERS.map((river) => ({
+      ...river,
+      d: pathGen(toLineString(river.coordinates)) ?? '',
+      labelPt: project(river.labelPosition),
+    }));
+
+    // Pré-projeção das Matrizes Indígenas
+    const indigenousRegions = INDIGENOUS_REGIONS.map((region) => {
+      const meta = INDIGENOUS_MATRICES.find((m) => m.id === region.id) ?? null;
+      return {
+        id: region.id,
+        meta,
+        polygonsD: region.polygons.map(
+          (poly) => pathGen(toPolygon(poly)) ?? ''
+        ),
+        labelPt: project(region.labelPosition),
+      };
+    });
+
+    // Pré-projeção dos rótulos dos 5 Brasis
+    const brasisLabels = DARCY_BRASIS.map((brasil) => ({
+      brasil,
+      pt: project(brasil.centroid),
+    }));
+
     return {
       projection,
       pathGen,
+      project,
       graticulePath,
       outlinePath: pathGen(brazilOutline) ?? '',
       outlinePre1903Path: pathGen(brazilPre1903Outline) ?? '',
@@ -266,27 +352,13 @@ export function MapCanvas({
       states,
       acreState,
       imperialProvinces1850,
+      rivers,
+      indigenousRegions,
+      brasisLabels,
     };
   }, []);
 
-  const projectPoint = useCallback(
-    (coord: LngLat): readonly [number, number] | null => {
-      const pt = geo.projection([coord[0], coord[1]]);
-      return pt ? [pt[0], pt[1]] : null;
-    },
-    [geo.projection]
-  );
-
-  // Índice rápido de eventos visíveis para desenhar Fios de Continuidade
-  const eventsById = useMemo(() => {
-    const map = new Map<string, HistoricalEvent>();
-    for (const ev of events) {
-      map.set(ev.id, ev);
-    }
-    return map;
-  }, [events]);
-
-  // Recorte territorial ativo
+  // Recorte territorial ativo pré-projetado (recalcula apenas quando activeSnapshot muda)
   const activeSnapshotMeta = useMemo(
     () =>
       TERRITORIAL_SNAPSHOTS.find((s) => s.id === activeSnapshot) ??
@@ -294,15 +366,106 @@ export function MapCanvas({
     [activeSnapshot]
   );
 
-  const activeOverlay = TERRITORIAL_OVERLAYS[activeSnapshot];
+  const projectedOverlay = useMemo(() => {
+    const overlay = TERRITORIAL_OVERLAYS[activeSnapshot];
+    if (!overlay) return null;
 
-  // Notas cartográficas "?" visíveis para o recorte atual
-  const visibleNotes = useMemo(() => {
+    return {
+      id: overlay.id,
+      highlightAreaD: overlay.highlightArea
+        ? (geo.pathGen(toPolygon(overlay.highlightArea)) ?? '')
+        : null,
+      spanishAreaD: overlay.spanishArea
+        ? (geo.pathGen(toPolygon(overlay.spanishArea)) ?? '')
+        : null,
+      secondaryLineD: overlay.secondaryLine
+        ? (geo.pathGen(toLineString(overlay.secondaryLine)) ?? '')
+        : null,
+      meridianLineD: overlay.meridianLine
+        ? (geo.pathGen(toLineString(overlay.meridianLine)) ?? '')
+        : null,
+      borderLineD: overlay.borderLine
+        ? (geo.pathGen(toLineString(overlay.borderLine)) ?? '')
+        : null,
+      capitanias: overlay.capitanias?.map((cap, idx) => {
+        const bandPoly: LngLat[] = [
+          [-48.7, cap.northLat],
+          [-33.0, cap.northLat],
+          [-33.0, cap.southLat],
+          [-48.7, cap.southLat],
+          [-48.7, cap.northLat],
+        ];
+        return {
+          id: cap.id,
+          name: cap.name,
+          fill: idx % 2 === 0 ? '#B85336' : '#C68B2C',
+          d: geo.pathGen(toPolygon(bandPoly)) ?? '',
+          labelPt: cap.labelPosition ? geo.project(cap.labelPosition) : null,
+        };
+      }),
+      capitalMarker: overlay.capitalMarker
+        ? {
+            name: overlay.capitalMarker.name,
+            pt: geo.project(overlay.capitalMarker.position),
+          }
+        : null,
+      labels: overlay.labels.map((lbl) => ({
+        text: lbl.text,
+        subtext: lbl.subtext,
+        rotation: lbl.rotation,
+        pt: geo.project(lbl.position),
+      })),
+    };
+  }, [activeSnapshot, geo]);
+
+  // Pré-projeção dos eventos visíveis e dos Fios de Continuidade
+  const projectedEvents = useMemo(
+    () =>
+      events.map((event) => ({
+        event,
+        pt: geo.project(event.coordinates),
+      })),
+    [events, geo]
+  );
+
+  const projectedThreads = useMemo(() => {
+    const ptById = new Map<string, readonly [number, number]>();
+    for (const item of projectedEvents) {
+      if (item.pt) ptById.set(item.event.id, item.pt);
+    }
+
+    return CONTINUITY_THREADS.map((thread) => {
+      const pts = thread.eventIds
+        .map((id) => ({ id, pt: ptById.get(id) }))
+        .filter(
+          (entry): entry is { id: string; pt: readonly [number, number] } =>
+            Boolean(entry.pt)
+        );
+      const segments =
+        pts.length >= 2
+          ? pts.slice(0, -1).map((curr, idx) => ({
+              key: `${thread.id}-${curr.id}-${pts[idx + 1].id}`,
+              d: createCurvedArcPath(
+                curr.pt,
+                pts[idx + 1].pt,
+                idx % 2 === 0 ? 0.2 : -0.18
+              ),
+            }))
+          : [];
+      return { thread, segments };
+    });
+  }, [projectedEvents]);
+
+  // Notas cartográficas "?" pré-projetadas para o recorte atual
+  const projectedNotes = useMemo(() => {
     if (!isOverlayActive) return [];
     return CARTOGRAPHIC_NOTES.filter((note) =>
       note.snapshots.includes(activeSnapshot)
-    );
-  }, [isOverlayActive, activeSnapshot]);
+    ).map((note) => ({
+      note,
+      pt: geo.project(note.coordinates),
+    }));
+  }, [isOverlayActive, activeSnapshot, geo]);
 
   // Zoom por botão (centrado no centro do viewBox)
   const applyZoomFactor = useCallback((factor: number) => {
@@ -311,7 +474,7 @@ export function MapCanvas({
         MAX_SCALE,
         Math.max(MIN_SCALE, prev.scale * factor)
       );
-      const ratio = nextScale / prev.scale;
+      const ratio = prev.scale > 0 ? nextScale / prev.scale : 1;
       return clampTransform({
         scale: nextScale,
         x: prev.x * ratio,
@@ -321,25 +484,7 @@ export function MapCanvas({
   }, []);
 
   const handleResetView = useCallback(() => {
-    setTransform({ scale: 1, x: 0, y: 0 });
-  }, []);
-
-  // Zoom com roda do mouse
-  const handleWheel = useCallback((e: ReactWheelEvent<SVGSVGElement>) => {
-    e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.14 : 1 / 1.14;
-    setTransform((prev) => {
-      const nextScale = Math.min(
-        MAX_SCALE,
-        Math.max(MIN_SCALE, prev.scale * factor)
-      );
-      const ratio = nextScale / prev.scale;
-      return clampTransform({
-        scale: nextScale,
-        x: prev.x * ratio,
-        y: prev.y * ratio,
-      });
-    });
+    setTransform(DEFAULT_TRANSFORM);
   }, []);
 
   // Pan via pointer events
@@ -349,7 +494,6 @@ export function MapCanvas({
       const target = e.target as Element | null;
       if (target?.closest('[data-map-interactive="true"]')) return;
 
-      // Fecha popup contextual ao clicar fora no mapa
       setActiveNote(null);
 
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -427,7 +571,6 @@ export function MapCanvas({
               }
         );
       } else {
-        // Fallback para acionamento por teclado: posiciona próximo ao centro
         setActiveNote((prev) =>
           prev?.note.id === note.id
             ? null
@@ -443,6 +586,7 @@ export function MapCanvas({
   );
 
   // Escala inversa suave para marcadores e textos permanecerem legíveis no zoom
+  const invScale = 1 / transform.scale;
   const markerInvScale = 1 / Math.sqrt(transform.scale);
 
   // Clip ativo conforme recorte temporal (sem AC antes de 1903)
@@ -455,64 +599,30 @@ export function MapCanvas({
       ref={containerRef}
       className="relative w-full h-full overflow-hidden bg-parchment select-none"
     >
+      {/* Textura sutil estática de papel pergaminho via CSS (fora do SVG para zero repaint no zoom) */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'radial-gradient(circle at 20% 20%, rgba(184, 83, 54, 0.035), transparent 55%), radial-gradient(circle at 80% 75%, rgba(43, 69, 112, 0.035), transparent 55%), repeating-linear-gradient(0deg, rgba(30, 36, 43, 0.012) 0px, rgba(30, 36, 43, 0.012) 1px, transparent 1px, transparent 4px)',
+        }}
+      />
+
       <svg
         ref={svgRef}
         viewBox={`0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}`}
-        className={`w-full h-full block ${
+        className={`relative w-full h-full block ${
           isDragging ? 'cursor-grabbing' : 'cursor-grab'
         }`}
         role="img"
         aria-label="Mapa vetorial interativo da formação histórica do Brasil"
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
         <defs>
-          {/* Textura sutil de papel pergaminho */}
-          <filter
-            id="paper-texture"
-            x="0%"
-            y="0%"
-            width="100%"
-            height="100%"
-          >
-            <feTurbulence
-              type="fractalNoise"
-              baseFrequency="0.65"
-              numOctaves="3"
-              stitchTiles="stitch"
-              result="noise"
-            />
-            <feColorMatrix
-              type="saturate"
-              values="0"
-              in="noise"
-              result="grayNoise"
-            />
-            <feComponentTransfer in="grayNoise">
-              <feFuncA type="linear" slope="0.04" />
-            </feComponentTransfer>
-          </filter>
-
-          {/* Sombra cartográfica discreta sob o território */}
-          <filter
-            id="land-shadow"
-            x="-5%"
-            y="-5%"
-            width="110%"
-            height="110%"
-          >
-            <feDropShadow
-              dx="0"
-              dy="3"
-              stdDeviation="5"
-              floodColor="#1E242B"
-              floodOpacity="0.09"
-            />
-          </filter>
-
           {/* Recorte (clip) com a silhueta completa do Brasil (27 UFs) */}
           <clipPath id="brazil-land-clip">
             <path d={geo.outlinePath} />
@@ -587,15 +697,6 @@ export function MapCanvas({
           </pattern>
         </defs>
 
-        {/* Fundo papel pergaminho + textura */}
-        <rect width={VIEWBOX_SIZE} height={VIEWBOX_SIZE} fill="#F7F3E9" />
-        <rect
-          width={VIEWBOX_SIZE}
-          height={VIEWBOX_SIZE}
-          filter="url(#paper-texture)"
-          pointerEvents="none"
-        />
-
         {/* Grupo transformável (Zoom + Pan centrado) */}
         <g
           transform={`translate(${VIEWBOX_SIZE / 2 + transform.x}, ${
@@ -606,19 +707,19 @@ export function MapCanvas({
         >
           {/* CAMADA 1: Retícula geográfica (Graticule) */}
           {layers.showGraticule && (
-            <g className="transition-opacity duration-300" pointerEvents="none">
+            <g pointerEvents="none">
               <path
                 d={geo.graticulePath}
                 fill="none"
                 stroke="#DCD3BE"
-                strokeWidth={0.75 / transform.scale}
+                strokeWidth={0.75 * invScale}
                 strokeDasharray="3 4"
                 opacity={0.75}
               />
             </g>
           )}
 
-          {/* CAMADA 2: Território Base — varia com rigor histórico conforme o recorte */}
+          {/* CAMADA 2: Território Base — sombra vetorial leve (sem feDropShadow) + malha histórica */}
           {/* 2A. Contorno de referência do Acre (AC) fora do Brasil antes de 1903 */}
           {isPre1903 && geo.acreState && (
             <path
@@ -626,9 +727,8 @@ export function MapCanvas({
               fill="#F7F3E9"
               fillOpacity={0.6}
               stroke="#9B9079"
-              strokeWidth={1.1 / transform.scale}
+              strokeWidth={1.1 * invScale}
               strokeDasharray="4 3"
-              className="transition-all duration-300"
               onMouseEnter={() => {
                 setHoveredState(null);
                 setHoveredProvinceName(
@@ -639,34 +739,46 @@ export function MapCanvas({
             />
           )}
 
-          {/* 2B. Modo Colônia (1500, 1534, 1750): silhueta pré-1903 translúcida como referência espacial, sem UFs modernas */}
+          {/* 2B. Modo Colônia (1500, 1534, 1750): silhueta pré-1903 translúcida como referência espacial */}
           {isColonial && (
-            <g filter="url(#land-shadow)">
+            <g>
+              <path
+                d={geo.outlinePre1903Path}
+                transform="translate(0, 3)"
+                fill="#1E242B"
+                fillOpacity={0.07}
+                pointerEvents="none"
+              />
               <path
                 d={geo.outlinePre1903Path}
                 fill="#EFE9DA"
                 fillOpacity={activeSnapshot === 'madri_1750' ? 0.78 : 0.56}
                 stroke="#B7AA8E"
-                strokeWidth={1.15 / transform.scale}
+                strokeWidth={1.15 * invScale}
                 strokeDasharray={
                   activeSnapshot === 'madri_1750' ? undefined : '4 3'
                 }
-                className="transition-all duration-300"
               />
             </g>
           )}
 
-          {/* 2C. Modo Império (1850): 19 Províncias Imperiais unificadas via topojson.merge (sem AC e sem divisas pós-1850) */}
+          {/* 2C. Modo Império (1850): 19 Províncias Imperiais unificadas via topojson.merge */}
           {isImperial && (
             <g>
-              <g filter="url(#land-shadow)">
-                <path
-                  d={geo.outlinePre1903Path}
-                  fill="#EFE9DA"
-                  stroke="#2B4570"
-                  strokeWidth={1.4 / transform.scale}
-                />
-              </g>
+              <path
+                d={geo.outlinePre1903Path}
+                transform="translate(0, 3)"
+                fill="#1E242B"
+                fillOpacity={0.07}
+                pointerEvents="none"
+              />
+              <path
+                d={geo.outlinePre1903Path}
+                fill="#EFE9DA"
+                stroke="#2B4570"
+                strokeWidth={1.4 * invScale}
+                pointerEvents="none"
+              />
               {geo.imperialProvinces1850.map((prov) => {
                 const isHovered = hoveredProvinceName === prov.name;
                 return (
@@ -675,7 +787,7 @@ export function MapCanvas({
                     d={prov.d}
                     fill={isHovered ? '#E5DCC6' : '#EFE9DA'}
                     stroke="#2B4570"
-                    strokeWidth={(isHovered ? 1.35 : 0.9) / transform.scale}
+                    strokeWidth={(isHovered ? 1.35 : 0.9) * invScale}
                     strokeOpacity={isHovered ? 0.95 : 0.65}
                     className="transition-colors duration-150 cursor-pointer"
                     onMouseEnter={() => {
@@ -706,14 +818,20 @@ export function MapCanvas({
           {/* 2D. Modo República (1889–atual) ou sem recorte territorial: malha completa das 27 UFs */}
           {!isColonial && !isImperial && (
             <g>
-              <g filter="url(#land-shadow)">
-                <path
-                  d={geo.outlinePath}
-                  fill="#EFE9DA"
-                  stroke="#B7AA8E"
-                  strokeWidth={1.25 / transform.scale}
-                />
-              </g>
+              <path
+                d={geo.outlinePath}
+                transform="translate(0, 3)"
+                fill="#1E242B"
+                fillOpacity={0.07}
+                pointerEvents="none"
+              />
+              <path
+                d={geo.outlinePath}
+                fill="#EFE9DA"
+                stroke="#B7AA8E"
+                strokeWidth={1.25 * invScale}
+                pointerEvents="none"
+              />
 
               {geo.states.map(({ properties, d }) => {
                 const isHovered = hoveredState?.sigla === properties.sigla;
@@ -735,7 +853,7 @@ export function MapCanvas({
                           ? '#555B61'
                           : 'none'
                     }
-                    strokeWidth={(isBrasilSelected ? 1.5 : 1) / transform.scale}
+                    strokeWidth={(isBrasilSelected ? 1.5 : 1) * invScale}
                     className="transition-colors duration-150 cursor-pointer"
                     onMouseEnter={() => {
                       setHoveredProvinceName(null);
@@ -760,11 +878,7 @@ export function MapCanvas({
 
           {/* CAMADA 3: Coroplético dos 5 Brasis de Darcy Ribeiro (exclui AC antes de 1903) */}
           {layers.showDarcyBrasis && (
-            <g
-              style={{ mixBlendMode: 'multiply' }}
-              className="transition-opacity duration-300"
-              pointerEvents="none"
-            >
+            <g style={{ mixBlendMode: 'multiply' }} pointerEvents="none">
               {geo.states.map(({ properties, d }) => {
                 if (isPre1903 && properties.sigla === 'AC') return null;
                 const brasil = brasilByState.get(properties.sigla);
@@ -783,7 +897,7 @@ export function MapCanvas({
                     d={d}
                     fill={brasil.color}
                     fillOpacity={opacity}
-                    className="transition-all duration-300"
+                    className="transition-opacity duration-200"
                   />
                 );
               })}
@@ -795,14 +909,10 @@ export function MapCanvas({
             <g
               clipPath={activeLandClipUrl}
               style={{ mixBlendMode: 'multiply' }}
-              className="transition-opacity duration-300"
               pointerEvents="none"
             >
-              {INDIGENOUS_REGIONS.map((region) => {
-                const meta = INDIGENOUS_MATRICES.find(
-                  (m) => m.id === region.id
-                );
-                if (!meta) return null;
+              {geo.indigenousRegions.map((region) => {
+                if (!region.meta) return null;
                 const isHighlighted =
                   selectedIndigenousId === null ||
                   selectedIndigenousId === region.id;
@@ -810,102 +920,90 @@ export function MapCanvas({
                   <g
                     key={`indig-${region.id}`}
                     opacity={isHighlighted ? 0.92 : 0.25}
+                    className="transition-opacity duration-200"
                   >
-                    {region.polygons.map((poly, idx) => {
-                      const d = geo.pathGen(toPolygon(poly)) ?? '';
-                      return (
-                        <path
-                          key={`${region.id}-${idx}`}
-                          d={d}
-                          fill={`url(#pattern-${meta.pattern})`}
-                          stroke={meta.color}
-                          strokeWidth={0.9 / transform.scale}
-                          strokeDasharray="3 3"
-                          strokeOpacity={0.55}
-                        />
-                      );
-                    })}
+                    {region.polygonsD.map((d, idx) => (
+                      <path
+                        key={`${region.id}-${idx}`}
+                        d={d}
+                        fill={`url(#pattern-${region.meta!.pattern})`}
+                        stroke={region.meta!.color}
+                        strokeWidth={0.9 * invScale}
+                        strokeDasharray="3 3"
+                        strokeOpacity={0.55}
+                      />
+                    ))}
                   </g>
                 );
               })}
             </g>
           )}
 
-          {/* Divisas interestaduais modernas (exibidas apenas na República ou sem recorte histórico) */}
+          {/* Divisas interestaduais modernas (apenas na República ou sem recorte histórico) */}
           {!isColonial && !isImperial && (
             <path
               d={geo.internalBordersPath}
               fill="none"
               stroke={isOverlayActive ? '#2F5D50' : '#C5BA9F'}
-              strokeWidth={(isOverlayActive ? 1.0 : 0.75) / transform.scale}
+              strokeWidth={(isOverlayActive ? 1.0 : 0.75) * invScale}
               strokeOpacity={0.72}
               pointerEvents="none"
-              className="transition-all duration-300"
             />
           )}
 
           {/* CAMADA 5: Grandes Rios */}
           {layers.showRivers && (
-            <g className="transition-opacity duration-300" pointerEvents="none">
-              {MAJOR_RIVERS.map((river) => {
-                const d = geo.pathGen(toLineString(river.coordinates)) ?? '';
-                const labelPt = projectPoint(river.labelPosition);
-                return (
-                  <g key={river.id}>
-                    <path
-                      d={d}
-                      fill="none"
-                      stroke="#4A7A96"
-                      strokeWidth={river.strokeWidth / Math.sqrt(transform.scale)}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeOpacity={0.68}
-                    />
-                    {labelPt && (
-                      <text
-                        x={labelPt[0]}
-                        y={labelPt[1]}
-                        transform={
-                          river.labelRotation
-                            ? `rotate(${river.labelRotation}, ${labelPt[0]}, ${labelPt[1]})`
-                            : undefined
-                        }
-                        fill="#355F78"
-                        fontSize={9.5 * markerInvScale}
-                        fontFamily="var(--font-serif)"
-                        fontStyle="italic"
-                        fontWeight={600}
-                        textAnchor="middle"
-                        opacity={0.85}
-                      >
-                        {river.name}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
+            <g pointerEvents="none">
+              {geo.rivers.map((river) => (
+                <g key={river.id}>
+                  <path
+                    d={river.d}
+                    fill="none"
+                    stroke="#4A7A96"
+                    strokeWidth={river.strokeWidth * markerInvScale}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeOpacity={0.68}
+                  />
+                  {river.labelPt && (
+                    <text
+                      x={river.labelPt[0]}
+                      y={river.labelPt[1]}
+                      transform={
+                        river.labelRotation
+                          ? `rotate(${river.labelRotation}, ${river.labelPt[0]}, ${river.labelPt[1]})`
+                          : undefined
+                      }
+                      fill="#355F78"
+                      fontSize={9.5 * markerInvScale}
+                      fontFamily="var(--font-serif)"
+                      fontStyle="italic"
+                      fontWeight={600}
+                      textAnchor="middle"
+                      opacity={0.85}
+                    >
+                      {river.name}
+                    </text>
+                  )}
+                </g>
+              ))}
             </g>
           )}
 
           {/* CAMADA 6: Recorte Territorial Histórico */}
-          {isOverlayActive && activeOverlay && (
-            <g
-              key={activeOverlay.id}
-              className="transition-opacity duration-300"
-              pointerEvents="none"
-            >
-              {/* Áreas clipadas à silhueta válida do período (sem AC antes de 1903) */}
+          {isOverlayActive && projectedOverlay && (
+            <g key={projectedOverlay.id} pointerEvents="none">
               <g clipPath={activeLandClipUrl}>
-                {activeOverlay.highlightArea && (
+                {projectedOverlay.highlightAreaD && (
                   <path
-                    d={geo.pathGen(toPolygon(activeOverlay.highlightArea)) ?? ''}
+                    d={projectedOverlay.highlightAreaD}
                     fill={activeSnapshotMeta.color}
                     fillOpacity={0.22}
                   />
                 )}
-                {activeOverlay.spanishArea && (
+                {projectedOverlay.spanishAreaD && (
                   <path
-                    d={geo.pathGen(toPolygon(activeOverlay.spanishArea)) ?? ''}
+                    d={projectedOverlay.spanishAreaD}
                     fill="#1E242B"
                     fillOpacity={0.05}
                   />
@@ -917,128 +1015,102 @@ export function MapCanvas({
                     fillOpacity={0.11}
                   />
                 )}
-                {activeOverlay.capitanias?.map((cap, idx) => {
-                  const bandPoly: LngLat[] = [
-                    [-48.7, cap.northLat],
-                    [-33.0, cap.northLat],
-                    [-33.0, cap.southLat],
-                    [-48.7, cap.southLat],
-                    [-48.7, cap.northLat],
-                  ];
-                  const d = geo.pathGen(toPolygon(bandPoly)) ?? '';
-                  const labelPt = cap.labelPosition
-                    ? projectPoint(cap.labelPosition)
-                    : null;
-                  return (
-                    <g key={cap.id}>
-                      <path
-                        d={d}
-                        fill={idx % 2 === 0 ? '#B85336' : '#C68B2C'}
-                        fillOpacity={0.18}
-                        stroke="#A1462C"
-                        strokeWidth={0.95 / transform.scale}
-                        strokeOpacity={0.72}
-                      />
-                      {labelPt && (
-                        <text
-                          x={labelPt[0]}
-                          y={labelPt[1]}
-                          fill="#7A311D"
-                          fontSize={8.5 * markerInvScale}
-                          fontFamily="var(--font-serif)"
-                          fontWeight={600}
-                          letterSpacing="0.04em"
-                          textAnchor="middle"
-                        >
-                          {cap.name}
-                        </text>
-                      )}
-                    </g>
-                  );
-                })}
+                {projectedOverlay.capitanias?.map((cap) => (
+                  <g key={cap.id}>
+                    <path
+                      d={cap.d}
+                      fill={cap.fill}
+                      fillOpacity={0.18}
+                      stroke="#A1462C"
+                      strokeWidth={0.95 * invScale}
+                      strokeOpacity={0.72}
+                    />
+                    {cap.labelPt && (
+                      <text
+                        x={cap.labelPt[0]}
+                        y={cap.labelPt[1]}
+                        fill="#7A311D"
+                        fontSize={8.5 * markerInvScale}
+                        fontFamily="var(--font-serif)"
+                        fontWeight={600}
+                        letterSpacing="0.04em"
+                        textAnchor="middle"
+                      >
+                        {cap.name}
+                      </text>
+                    )}
+                  </g>
+                ))}
               </g>
 
-              {/* Linha secundária (ex: antiga linha de Tordesilhas em Madri 1750) */}
-              {activeOverlay.secondaryLine && (
+              {projectedOverlay.secondaryLineD && (
                 <path
-                  d={
-                    geo.pathGen(toLineString(activeOverlay.secondaryLine)) ?? ''
-                  }
+                  d={projectedOverlay.secondaryLineD}
                   fill="none"
                   stroke="#B85336"
-                  strokeWidth={1.25 / transform.scale}
+                  strokeWidth={1.25 * invScale}
                   strokeDasharray="4 5"
                   strokeOpacity={0.52}
                 />
               )}
 
-              {/* Linha principal do Meridiano de Tordesilhas */}
-              {activeOverlay.meridianLine && (
+              {projectedOverlay.meridianLineD && (
                 <path
-                  d={
-                    geo.pathGen(toLineString(activeOverlay.meridianLine)) ?? ''
-                  }
+                  d={projectedOverlay.meridianLineD}
                   fill="none"
                   stroke="#B85336"
-                  strokeWidth={2.3 / Math.sqrt(transform.scale)}
+                  strokeWidth={2.3 * markerInvScale}
                   strokeDasharray="7 4"
                   strokeOpacity={0.92}
                 />
               )}
 
-              {/* Fronteira do Tratado de Madri (1750) */}
-              {activeOverlay.borderLine && (
+              {projectedOverlay.borderLineD && (
                 <path
-                  d={geo.pathGen(toLineString(activeOverlay.borderLine)) ?? ''}
+                  d={projectedOverlay.borderLineD}
                   fill="none"
                   stroke="#8F3E28"
-                  strokeWidth={2.6 / Math.sqrt(transform.scale)}
+                  strokeWidth={2.6 * markerInvScale}
                   strokeDasharray="8 3 2 3"
                   strokeLinecap="round"
                   strokeOpacity={0.92}
                 />
               )}
 
-              {/* Marcador de Capital (Corte Imperial / Brasília) */}
-              {activeOverlay.capitalMarker &&
-                (() => {
-                  const pt = projectPoint(activeOverlay.capitalMarker.position);
-                  if (!pt) return null;
-                  return (
-                    <g transform={`translate(${pt[0]}, ${pt[1]})`}>
-                      <circle
-                        r={6.5 * markerInvScale}
-                        fill="none"
-                        stroke={activeSnapshotMeta.color}
-                        strokeWidth={1.2 * markerInvScale}
-                        strokeDasharray="2 2"
-                      />
-                      <circle
-                        r={3 * markerInvScale}
-                        fill={activeSnapshotMeta.color}
-                      />
-                      <text
-                        x={9 * markerInvScale}
-                        y={3 * markerInvScale}
-                        fill={activeSnapshotMeta.color}
-                        fontSize={9.5 * markerInvScale}
-                        fontFamily="var(--font-serif)"
-                        fontWeight={700}
-                      >
-                        {activeOverlay.capitalMarker.name}
-                      </text>
-                    </g>
-                  );
-                })()}
+              {projectedOverlay.capitalMarker?.pt && (
+                <g
+                  transform={`translate(${projectedOverlay.capitalMarker.pt[0]}, ${projectedOverlay.capitalMarker.pt[1]})`}
+                >
+                  <circle
+                    r={6.5 * markerInvScale}
+                    fill="none"
+                    stroke={activeSnapshotMeta.color}
+                    strokeWidth={1.2 * markerInvScale}
+                    strokeDasharray="2 2"
+                  />
+                  <circle
+                    r={3 * markerInvScale}
+                    fill={activeSnapshotMeta.color}
+                  />
+                  <text
+                    x={9 * markerInvScale}
+                    y={3 * markerInvScale}
+                    fill={activeSnapshotMeta.color}
+                    fontSize={9.5 * markerInvScale}
+                    fontFamily="var(--font-serif)"
+                    fontWeight={700}
+                  >
+                    {projectedOverlay.capitalMarker.name}
+                  </text>
+                </g>
+              )}
 
-              {/* Rótulos do recorte territorial */}
-              {activeOverlay.labels.map((lbl, idx) => {
-                const pt = projectPoint(lbl.position);
-                if (!pt) return null;
+              {projectedOverlay.labels.map((lbl, idx) => {
+                if (!lbl.pt) return null;
                 return (
                   <g
                     key={`overlay-lbl-${idx}`}
-                    transform={`translate(${pt[0]}, ${pt[1]})${
+                    transform={`translate(${lbl.pt[0]}, ${lbl.pt[1]})${
                       lbl.rotation ? ` rotate(${lbl.rotation})` : ''
                     }`}
                   >
@@ -1075,8 +1147,7 @@ export function MapCanvas({
           {/* Rótulos dos 5 Brasis de Darcy Ribeiro */}
           {layers.showDarcyBrasis && (
             <g pointerEvents="none">
-              {DARCY_BRASIS.map((brasil) => {
-                const pt = projectPoint(brasil.centroid);
+              {geo.brasisLabels.map(({ brasil, pt }) => {
                 if (!pt) return null;
                 const isSelected = selectedBrasilId === brasil.id;
                 const isDimmed =
@@ -1109,18 +1180,14 @@ export function MapCanvas({
           {/* Rótulos das Matrizes Indígenas */}
           {layers.showIndigenousMatrices && (
             <g pointerEvents="none">
-              {INDIGENOUS_REGIONS.map((region) => {
-                const meta = INDIGENOUS_MATRICES.find(
-                  (m) => m.id === region.id
-                );
-                const pt = projectPoint(region.labelPosition);
-                if (!meta || !pt) return null;
+              {geo.indigenousRegions.map((region) => {
+                if (!region.meta || !region.labelPt) return null;
                 return (
                   <text
                     key={`lbl-indig-${region.id}`}
-                    x={pt[0]}
-                    y={pt[1]}
-                    fill={meta.color}
+                    x={region.labelPt[0]}
+                    y={region.labelPt[1]}
+                    fill={region.meta.color}
                     fontSize={9.5 * markerInvScale}
                     fontFamily="var(--font-serif)"
                     fontStyle="italic"
@@ -1130,55 +1197,39 @@ export function MapCanvas({
                     strokeWidth={2.6 * markerInvScale}
                     paintOrder="stroke"
                   >
-                    {meta.name}
+                    {region.meta.name}
                   </text>
                 );
               })}
             </g>
           )}
 
-          {/* CAMADA 7: Fios de Continuidade (arcos Bézier) */}
+          {/* CAMADA 7: Fios de Continuidade (arcos Bézier pré-calculados) */}
           {layers.showContinuityArcs && (
-            <g className="transition-opacity duration-300" pointerEvents="none">
-              {CONTINUITY_THREADS.map((thread) => {
+            <g pointerEvents="none">
+              {projectedThreads.map(({ thread, segments }) => {
+                if (segments.length === 0) return null;
                 const isSelected = selectedThreadId === thread.id;
                 const isDimmed =
                   selectedThreadId !== null && selectedThreadId !== thread.id;
-                const threadEvents = thread.eventIds
-                  .map((id) => eventsById.get(id))
-                  .filter((ev): ev is HistoricalEvent => Boolean(ev));
-
-                if (threadEvents.length < 2) return null;
 
                 return (
                   <g
                     key={thread.id}
                     opacity={isDimmed ? 0.16 : isSelected ? 0.95 : 0.58}
+                    className="transition-opacity duration-200"
                   >
-                    {threadEvents.slice(0, -1).map((ev, idx) => {
-                      const nextEv = threadEvents[idx + 1];
-                      const p1 = projectPoint(ev.coordinates);
-                      const p2 = projectPoint(nextEv.coordinates);
-                      if (!p1 || !p2) return null;
-                      const d = createCurvedArcPath(
-                        p1,
-                        p2,
-                        idx % 2 === 0 ? 0.2 : -0.18
-                      );
-                      return (
-                        <path
-                          key={`${thread.id}-${ev.id}-${nextEv.id}`}
-                          d={d}
-                          fill="none"
-                          stroke={thread.color}
-                          strokeWidth={
-                            (isSelected ? 2.4 : 1.4) * markerInvScale
-                          }
-                          strokeDasharray={isSelected ? undefined : '5 4'}
-                          strokeLinecap="round"
-                        />
-                      );
-                    })}
+                    {segments.map((seg) => (
+                      <path
+                        key={seg.key}
+                        d={seg.d}
+                        fill="none"
+                        stroke={thread.color}
+                        strokeWidth={(isSelected ? 2.4 : 1.4) * markerInvScale}
+                        strokeDasharray={isSelected ? undefined : '5 4'}
+                        strokeLinecap="round"
+                      />
+                    ))}
                   </g>
                 );
               })}
@@ -1188,8 +1239,7 @@ export function MapCanvas({
           {/* CAMADA 8: Marcadores dos Eventos Históricos */}
           {layers.showEvents && (
             <g>
-              {events.map((event) => {
-                const pt = projectPoint(event.coordinates);
+              {projectedEvents.map(({ event, pt }) => {
                 if (!pt) return null;
                 const eraColor = ERAS[event.era].color;
                 const isSelected = selectedEventId === event.id;
@@ -1254,7 +1304,6 @@ export function MapCanvas({
                       fill={eraColor}
                       stroke="#F7F3E9"
                       strokeWidth={2 * markerInvScale}
-                      className="transition-all duration-150"
                     />
 
                     <g
@@ -1290,10 +1339,9 @@ export function MapCanvas({
           )}
 
           {/* CAMADA 9: Marcadores contextuais "?" de notas cartográficas */}
-          {visibleNotes.length > 0 && (
+          {projectedNotes.length > 0 && (
             <g>
-              {visibleNotes.map((note) => {
-                const pt = projectPoint(note.coordinates);
+              {projectedNotes.map(({ note, pt }) => {
                 if (!pt) return null;
                 const isOpen = activeNote?.note.id === note.id;
                 const r = (isOpen ? 10 : 8.5) * markerInvScale;
