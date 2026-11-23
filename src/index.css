@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-parchment: #f7f3e9;
+  --color-parchment-surface: #efe9da;
+  --color-parchment-border: #dcd3be;
+  --color-ink: #1e242b;
+  --color-ink-muted: #555b61;
+  --color-terracotta: #b85336;
+  --color-forest: #2f5d50;
+  --color-indigo-atlas: #2b4570;
+  --color-ochre: #c68b2c;
+
+  --font-serif: 'Cormorant Garamond', Georgia, serif;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  html,
+  body {
+    background-color: var(--color-parchment);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-serif);
+    color: var(--color-ink);
+  }
+}
