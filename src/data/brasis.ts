@@ -32,6 +32,7 @@ export const DARCY_BRASIS: readonly DarcyBrasil[] = [
       'colonia-matriz-tupi-1500',
       'colonia-engenho-acucar-1549',
       'colonia-palmares-1597',
+      'imperio-abolicao-mossoro-1883',
       'imperio-abolicao-1888',
     ],
   },
@@ -237,12 +238,13 @@ export const CONTINUITY_THREADS: readonly ContinuityThread[] = [
     title: 'Terra, Trabalho e Desigualdade Estrutural',
     subtitle: 'Do Engenho Escravista à Exclusão Agrária e Urbana',
     description:
-      'Liga os mecanismos que concentraram a propriedade da terra e desvalorizaram o trabalho ao longo de cinco séculos: a escravidão açucareira, a resistência de Palmares, o bloqueio fundiário da Lei de Terras de 1850, a abolição sem reparação em 1888 e os conflitos agrários republicanos como o Contestado.',
+      'Liga os mecanismos que concentraram a propriedade da terra e desvalorizaram o trabalho ao longo de cinco séculos: a escravidão açucareira, a resistência de Palmares, o bloqueio fundiário da Lei de Terras de 1850, o pioneirismo abolicionista de Mossoró (1883), a abolição sem reparação em 1888 e os conflitos agrários republicanos como o Contestado.',
     color: '#B85336',
     eventIds: [
       'colonia-engenho-acucar-1549',
       'colonia-palmares-1597',
       'imperio-lei-de-terras-1850',
+      'imperio-abolicao-mossoro-1883',
       'imperio-abolicao-1888',
       'republica-contestado-1912',
     ],

@@ -1,8 +1,8 @@
 import type { HistoricalEvent } from '../types';
 
 /**
- * Catálogo inicial com 21 marcos históricos georreferenciados da formação do Brasil
- * (7 Colônia, 7 Império, 7 República), articulados às lentes teóricas de
+ * Catálogo com 22 marcos históricos georreferenciados da formação do Brasil
+ * (7 Colônia, 8 Império, 7 República), articulados às lentes teóricas de
  * Sérgio Buarque de Holanda (*Raízes do Brasil*) e Darcy Ribeiro (*O Povo Brasileiro*).
  */
 export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
@@ -350,7 +350,7 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
   },
 
   // =========================================================================
-  // BRASIL IMPÉRIO (7 marcos: 1822–1888)
+  // BRASIL IMPÉRIO (8 marcos: 1822–1888)
   // =========================================================================
   {
     id: 'imperio-independencia-1822',
@@ -642,6 +642,55 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
     darcyBrasilId: 'caboclo',
   },
   {
+    id: 'imperio-abolicao-mossoro-1883',
+    title: 'Abolição da Escravidão em Mossoró',
+    shortTitle: 'Abolição em Mossoró (1883)',
+    year: 1883,
+    yearLabel: '1883',
+    era: 'imperio',
+    dimensions: ['politica', 'cultura'],
+    symbol: 'politica',
+    locationName: 'Mossoró (Rio Grande do Norte)',
+    stateCodes: ['RN'],
+    coordinates: [-37.3441, -5.1875],
+    summary:
+      'Em 30 de setembro de 1883 — quase cinco anos antes da Lei Áurea —, a mobilização cívica liderada pela Sociedade Libertadora Mossoroense decreta a extinção total da escravidão no município, convertendo Mossoró em símbolo do abolicionismo popular nordestino.',
+    historicalContext:
+      'Articulada à vanguarda abolicionista que sacudiu o Nordeste setentrional no início da década de 1880 — ao lado de Redenção (então Acarape), no Ceará, no mesmo ano de 1883 —, a campanha em Mossoró combinou arrecadação popular, pressão pública sobre senhores, fugas e a atuação da Sociedade Libertadora Mossoroense e da imprensa local (O Mossoroense). Em 30 de setembro de 1883, a cidade proclamou a libertação integral de seus escravizados, antecipando-se em quase cinco anos ao Estado imperial e firmando-se como marco pioneiro no Rio Grande do Norte.',
+    theoreticalReadings: [
+      {
+        lensId: 'patrimonialismo',
+        author: 'sergio_buarque',
+        conceptLabel: 'Esfera Cívica Local Contra o Imobilismo Patrimonial',
+        analysis:
+          'À luz de Raízes do Brasil, a abolição municipal em Mossoró contrasta com a lógica das reformas verticais conduzidas pelo Estado imperial: diante da resistência escravocrata das oligarquias agrárias nacionais, associações civis e jornais locais anteciparam uma ruptura ética construída a partir da sociedade civil.',
+      },
+      {
+        lensId: 'moinho_de_gastar_gente',
+        author: 'darcy_ribeiro',
+        conceptLabel: 'Fissuras na Empresa Escravista no Nordeste Setentrional',
+        analysis:
+          'Em O Povo Brasileiro, Darcy Ribeiro mostra que o regime escravista operou com intensidades distintas entre os Brasis: na economia sertanejo-salineira e comercial do Oeste potiguar, menos atrelada ao engenho e à grande lavoura cafeeira, a mobilização popular conseguiu desmontar mais cedo o "moinho de gastar gente" antes de sua derrocada nacional em 1888.',
+      },
+    ],
+    presentDayBridge: {
+      headline: 'Memória cívica potiguar e cidadania antirracista nos municípios',
+      summary:
+        'O 30 de setembro permanece vivo na identidade cívica de Mossoró e do Rio Grande do Norte como prova de que conquistas democráticas podem nascer da organização local, lembrando ainda que a liberdade jurídica de 1883 e 1888 exige continuidade em políticas concretas de igualdade racial e educação.',
+      indicators: [
+        'Celebração anual do 30 de setembro em Mossoró (Festa da Liberdade) como referência de memória abolicionista no Nordeste',
+        'Valorização das histórias regionais negras e da participação cidadã municipal na agenda contemporânea de direitos humanos',
+      ],
+    },
+    relatedEventIds: [
+      'imperio-abolicao-1888',
+      'imperio-lei-de-terras-1850',
+      'colonia-palmares-1597',
+    ],
+    darcyBrasilId: 'crioulo',
+    territorialSnapshotId: 'imperio_1850',
+  },
+  {
     id: 'imperio-abolicao-1888',
     title: 'Abolição Tardia e a Exclusão Pós-Escravidão',
     shortTitle: 'Abolição (1888)',
@@ -686,6 +735,7 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
       'colonia-engenho-acucar-1549',
       'colonia-palmares-1597',
       'imperio-lei-de-terras-1850',
+      'imperio-abolicao-mossoro-1883',
       'republica-constituicao-1988',
     ],
     darcyBrasilId: 'crioulo',

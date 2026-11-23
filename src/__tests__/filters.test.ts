@@ -14,9 +14,9 @@ import {
 } from '../utils/filters';
 
 describe('Utilitários de filtragem e consulta do Atlas', () => {
-  it('retorna os 21 eventos em ordem cronológica crescente quando nenhum filtro está ativo', () => {
+  it('retorna os 22 eventos em ordem cronológica crescente quando nenhum filtro está ativo', () => {
     const result = filterHistoricalEvents(HISTORICAL_EVENTS, DEFAULT_FILTERS);
-    expect(result).toHaveLength(21);
+    expect(result).toHaveLength(22);
     for (let i = 1; i < result.length; i++) {
       expect(result[i].year).toBeGreaterThanOrEqual(result[i - 1].year);
     }
@@ -39,7 +39,7 @@ describe('Utilitários de filtragem e consulta do Atlas', () => {
 
     expect(colonia).toHaveLength(7);
     expect(colonia.every((e) => e.era === 'colonia')).toBe(true);
-    expect(imperio).toHaveLength(7);
+    expect(imperio).toHaveLength(8);
     expect(imperio.every((e) => e.era === 'imperio')).toBe(true);
     expect(republica).toHaveLength(7);
     expect(republica.every((e) => e.era === 'republica')).toBe(true);

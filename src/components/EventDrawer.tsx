@@ -15,6 +15,7 @@ import {
   DARCY_BRASIS_TRANSITION_STATES,
   DIMENSIONS,
   ERAS,
+  HISTORICAL_EVENTS,
   INDIGENOUS_MATRICES,
   MAP_SYMBOLS,
   THEORETICAL_LENSES,
@@ -184,7 +185,7 @@ function OverviewContent({
           Como o Brasil se tornou o Brasil
         </h2>
         <p className="text-sm text-ink-muted leading-relaxed mt-2">
-          Explore 21 marcos históricos entre Colônia, Império e República para
+          Explore {HISTORICAL_EVENTS.length} marcos históricos entre Colônia, Império e República para
           observar como fronteiras, ciclos econômicos, matrizes étnicas e
           estruturas de poder moldaram o território e ecoam no país
           contemporâneo.

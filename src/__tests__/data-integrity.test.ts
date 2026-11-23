@@ -29,11 +29,11 @@ function expectValidBrazilCoords([lon, lat]: LngLat, label: string) {
 }
 
 describe('Integridade dos dados históricos e cartográficos', () => {
-  it('contém exatamente 21 marcos históricos (7 Colônia, 7 Império, 7 República) com IDs únicos', () => {
-    expect(HISTORICAL_EVENTS).toHaveLength(21);
+  it('contém exatamente 22 marcos históricos (7 Colônia, 8 Império, 7 República) com IDs únicos', () => {
+    expect(HISTORICAL_EVENTS).toHaveLength(22);
 
     const ids = new Set(HISTORICAL_EVENTS.map((e) => e.id));
-    expect(ids.size).toBe(21);
+    expect(ids.size).toBe(22);
 
     const byEra = {
       colonia: HISTORICAL_EVENTS.filter((e) => e.era === 'colonia'),
@@ -41,8 +41,23 @@ describe('Integridade dos dados históricos e cartográficos', () => {
       republica: HISTORICAL_EVENTS.filter((e) => e.era === 'republica'),
     };
     expect(byEra.colonia).toHaveLength(7);
-    expect(byEra.imperio).toHaveLength(7);
+    expect(byEra.imperio).toHaveLength(8);
     expect(byEra.republica).toHaveLength(7);
+  });
+
+  it('inclui o marco de Abolição em Mossoró (1883, RN) vinculado ao fio terra-trabalho-desigualdade', () => {
+    const mossoro = HISTORICAL_EVENTS.find(
+      (e) => e.id === 'imperio-abolicao-mossoro-1883'
+    );
+    expect(mossoro).toBeDefined();
+    expect(mossoro?.year).toBe(1883);
+    expect(mossoro?.era).toBe('imperio');
+    expect(mossoro?.stateCodes).toContain('RN');
+
+    const thread = CONTINUITY_THREADS.find(
+      (t) => t.id === 'terra-trabalho-desigualdade'
+    );
+    expect(thread?.eventIds).toContain('imperio-abolicao-mossoro-1883');
   });
 
   it('possui coordenadas [lon, lat] válidas dentro dos limites do Brasil em todos os registros georreferenciados', () => {
