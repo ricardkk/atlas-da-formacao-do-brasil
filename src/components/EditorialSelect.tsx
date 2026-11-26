@@ -216,10 +216,10 @@ export function EditorialSelect({
         role="listbox"
         aria-label={ariaLabel}
         aria-hidden={!isOpen}
-        className={`absolute left-0 top-full mt-1.5 z-50 ${menuWidthClassName} origin-top rounded-md border border-parchment-border border-t-2 border-t-terracotta/60 bg-parchment py-1.5 shadow-lg transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none ${
+        className={`absolute left-0 top-full mt-1.5 z-50 ${menuWidthClassName} origin-top rounded-md border border-parchment-border border-t-2 border-t-terracotta/60 bg-parchment py-1.5 shadow-lg transition-[opacity,transform,visibility] duration-150 ease-out motion-reduce:transition-none ${
           isOpen
-            ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
-            : 'opacity-0 -translate-y-1 scale-[0.98] pointer-events-none'
+            ? 'visible opacity-100 translate-y-0 scale-100 pointer-events-auto'
+            : 'invisible opacity-0 -translate-y-1 scale-[0.98] pointer-events-none'
         }`}
       >
         <div className="max-h-72 overflow-y-auto px-1">

@@ -185,7 +185,7 @@ export function App() {
         onGoOverview={handleGoOverview}
       />
 
-      <div className="flex-1 min-h-0 flex relative">
+      <div className="flex-1 min-h-0 flex relative overflow-hidden">
         {/* Coluna principal: Mapa Vetorial + Barra Cronológica */}
         <main className="flex-1 min-w-0 flex flex-col">
           <div className="flex-1 min-h-0 relative z-0">

@@ -108,7 +108,7 @@ export function HeaderFilters({
   const filtersActive = hasActiveFilters(filters);
 
   return (
-    <header className="relative shrink-0 border-b border-parchment-border bg-parchment-surface z-20">
+    <header className="relative shrink-0 border-b border-parchment-border bg-parchment-surface z-30">
       {/* Linha superior: Título editorial, contador e ações */}
       <div className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-parchment-border/70">
         <button

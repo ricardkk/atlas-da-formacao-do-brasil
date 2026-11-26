@@ -724,13 +724,12 @@ export function MapCanvas({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full select-none"
+      className="relative w-full h-full overflow-hidden select-none"
     >
       <svg
         ref={svgRef}
         viewBox={`0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}`}
-        overflow="visible"
-        className={`relative w-full h-full block overflow-visible ${
+        className={`relative w-full h-full block ${
           isDragging ? 'cursor-grabbing' : 'cursor-grab'
         }`}
         role="img"
@@ -876,8 +875,8 @@ export function MapCanvas({
               d={geo.acreState.d}
               fill="#F3E4CE"
               fillOpacity={0.68}
-              stroke="#A67A50"
-              strokeWidth={1.1 * invScale}
+              stroke="#7A5230"
+              strokeWidth={1.35 * invScale}
               strokeDasharray="4 3"
               onMouseEnter={() => {
                 setHoveredState(null);
@@ -894,17 +893,18 @@ export function MapCanvas({
             <g>
               <path
                 d={geo.outlinePre1903Path}
-                transform="translate(0, 3)"
-                fill="#5A3014"
-                fillOpacity={0.09}
+                transform="translate(0, 3.5)"
+                fill="#4A250E"
+                fillOpacity={0.13}
                 pointerEvents="none"
               />
               <path
                 d={geo.outlinePre1903Path}
                 fill="#EEDBC1"
                 fillOpacity={activeSnapshot === 'madri_1750' ? 0.82 : 0.62}
-                stroke="#B07E4F"
-                strokeWidth={1.2 * invScale}
+                stroke="#6E4424"
+                strokeWidth={1.75 * invScale}
+                strokeLinejoin="round"
                 strokeDasharray={
                   activeSnapshot === 'madri_1750' ? undefined : '4 3'
                 }
@@ -917,16 +917,17 @@ export function MapCanvas({
             <g>
               <path
                 d={geo.outlinePre1903Path}
-                transform="translate(0, 3)"
-                fill="#5A3014"
-                fillOpacity={0.09}
+                transform="translate(0, 3.5)"
+                fill="#4A250E"
+                fillOpacity={0.13}
                 pointerEvents="none"
               />
               <path
                 d={geo.outlinePre1903Path}
                 fill="#EEDBC1"
-                stroke="#2B4570"
-                strokeWidth={1.4 * invScale}
+                stroke="#1F365B"
+                strokeWidth={2.1 * invScale}
+                strokeLinejoin="round"
                 pointerEvents="none"
               />
               {geo.imperialProvinces1850.map((prov) => {
@@ -936,9 +937,9 @@ export function MapCanvas({
                     key={prov.id}
                     d={prov.d}
                     fill={isHovered ? '#E4CAA6' : '#EEDBC1'}
-                    stroke="#2B4570"
-                    strokeWidth={(isHovered ? 1.35 : 0.9) * invScale}
-                    strokeOpacity={isHovered ? 0.95 : 0.65}
+                    stroke="#1B3257"
+                    strokeWidth={(isHovered ? 1.85 : 1.45) * invScale}
+                    strokeOpacity={isHovered ? 1 : 0.92}
                     className="transition-colors duration-150 cursor-pointer"
                     onMouseEnter={() => {
                       setHoveredState(null);
@@ -965,16 +966,15 @@ export function MapCanvas({
             <g>
               <path
                 d={geo.outlinePath}
-                transform="translate(0, 3)"
-                fill="#5A3014"
-                fillOpacity={0.09}
+                transform="translate(0, 3.5)"
+                fill="#4A250E"
+                fillOpacity={0.13}
                 pointerEvents="none"
               />
               <path
                 d={geo.outlinePath}
                 fill="#EEDBC1"
-                stroke="#B07E4F"
-                strokeWidth={1.3 * invScale}
+                stroke="none"
                 pointerEvents="none"
               />
 
@@ -988,8 +988,8 @@ export function MapCanvas({
                     key={properties.sigla}
                     d={d}
                     fill={isHovered ? '#E5CCA8' : '#EEDBC1'}
-                    stroke={isHovered ? '#7A4E28' : 'none'}
-                    strokeWidth={1 * invScale}
+                    stroke={isHovered ? '#5A3418' : 'none'}
+                    strokeWidth={1.35 * invScale}
                     className="transition-colors duration-150 cursor-pointer"
                     onMouseEnter={() => {
                       setHoveredProvinceName(null);
@@ -1013,37 +1013,37 @@ export function MapCanvas({
           {/* Prolongamento sutil da retícula sobre o continente (estilo gravura cartográfica antiga) */}
           {layers.showGraticule && (
             <g pointerEvents="none">
-              <g clipPath={activeLandClipUrl} style={{ mixBlendMode: 'multiply' }}>
+              <g clipPath={activeLandClipUrl}>
                 <path
                   d={geo.graticuleMinorPath}
                   fill="none"
-                  stroke="#C97338"
+                  stroke="#B8642D"
                   strokeWidth={0.8 * invScale}
                   strokeDasharray="4 3"
-                  opacity={0.34}
+                  opacity={0.28}
                 />
                 <path
                   d={geo.graticuleMajorPath}
                   fill="none"
-                  stroke="#B85E28"
+                  stroke="#A44F1E"
                   strokeWidth={1.0 * invScale}
-                  opacity={0.46}
+                  opacity={0.38}
                 />
                 <path
                   d={geo.equatorPath}
                   fill="none"
-                  stroke="#A84C20"
+                  stroke="#963F18"
                   strokeWidth={1.2 * invScale}
                   strokeDasharray="8 3 2 3"
-                  opacity={0.55}
+                  opacity={0.48}
                 />
                 <path
                   d={geo.capricornPath}
                   fill="none"
-                  stroke="#A84C20"
+                  stroke="#963F18"
                   strokeWidth={1.15 * invScale}
                   strokeDasharray="6 3 1.5 3"
-                  opacity={0.52}
+                  opacity={0.45}
                 />
               </g>
               {geo.graticuleLabels.map((lbl) => (
@@ -1163,23 +1163,46 @@ export function MapCanvas({
             </g>
           )}
 
-          {/* Divisas interestaduais modernas (suavizadas quando os 5 Brasis estão ativos para evidenciar a continuidade cultural) */}
+          {/* Divisas interestaduais modernas + contorno externo nítido do Brasil sobre as camadas */}
           {!isColonial && !isImperial && (
+            <g pointerEvents="none">
+              <path
+                d={geo.internalBordersPath}
+                fill="none"
+                stroke={
+                  layers.showDarcyBrasis
+                    ? '#3B2514'
+                    : isOverlayActive
+                      ? '#1C3F35'
+                      : '#4E3019'
+                }
+                strokeWidth={
+                  (layers.showDarcyBrasis ? 1.15 : 1.5) *
+                  invScale
+                }
+                strokeOpacity={layers.showDarcyBrasis ? 0.62 : 0.94}
+                strokeLinejoin="round"
+              />
+              <path
+                d={geo.outlinePath}
+                fill="none"
+                stroke="#4A2E1A"
+                strokeWidth={2.0 * invScale}
+                strokeOpacity={0.92}
+                strokeLinejoin="round"
+              />
+            </g>
+          )}
+
+          {/* Contorno externo reforçado do Brasil no modo Império (1850) */}
+          {isImperial && (
             <path
-              d={geo.internalBordersPath}
+              d={geo.outlinePre1903Path}
               fill="none"
-              stroke={
-                layers.showDarcyBrasis
-                  ? '#5C4632'
-                  : isOverlayActive
-                    ? '#2F5D50'
-                    : '#BE9568'
-              }
-              strokeWidth={
-                (layers.showDarcyBrasis ? 0.65 : isOverlayActive ? 1.0 : 0.8) *
-                invScale
-              }
-              strokeOpacity={layers.showDarcyBrasis ? 0.22 : 0.72}
+              stroke="#1F365B"
+              strokeWidth={2.1 * invScale}
+              strokeOpacity={0.92}
+              strokeLinejoin="round"
               pointerEvents="none"
             />
           )}
