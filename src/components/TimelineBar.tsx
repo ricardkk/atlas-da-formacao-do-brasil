@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { ERAS, TERRITORIAL_SNAPSHOTS } from '../data';
 import type { HistoricalEvent, TerritorialSnapshotId } from '../types';
@@ -18,6 +24,11 @@ interface TrackMetrics {
   readonly activeX: number | null;
 }
 
+interface SegmentPillMetrics {
+  readonly x: number;
+  readonly width: number;
+}
+
 export function TimelineBar({
   events,
   selectedEventId,
@@ -28,16 +39,27 @@ export function TimelineBar({
 }: TimelineBarProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const segmentContainerRef = useRef<HTMLDivElement>(null);
+  const segmentRefs = useRef<Map<TerritorialSnapshotId, HTMLButtonElement>>(
+    new Map()
+  );
+
   const [metrics, setMetrics] = useState<TrackMetrics>({
     firstX: 8,
     spanWidth: 0,
     activeX: null,
+  });
+  const [segmentPill, setSegmentPill] = useState<SegmentPillMetrics>({
+    x: 0,
+    width: 0,
   });
 
   const activeSnapshotIndex = Math.max(
     0,
     TERRITORIAL_SNAPSHOTS.findIndex((s) => s.id === activeSnapshot)
   );
+  const activeSnapshotMeta =
+    TERRITORIAL_SNAPSHOTS[activeSnapshotIndex] ?? TERRITORIAL_SNAPSHOTS[0];
 
   const selectedEventIndex = selectedEventId
     ? events.findIndex((ev) => ev.id === selectedEventId)
@@ -61,6 +83,56 @@ export function TimelineBar({
       (selectedEventIndex + delta + events.length) % events.length;
     onSelectEvent(events[nextIndex].id);
   };
+
+  const handleSegmentKeyDown = (
+    e: ReactKeyboardEvent<HTMLButtonElement>,
+    idx: number
+  ) => {
+    let nextIdx: number | null = null;
+    if (e.key === 'ArrowRight') {
+      nextIdx = (idx + 1) % TERRITORIAL_SNAPSHOTS.length;
+    } else if (e.key === 'ArrowLeft') {
+      nextIdx =
+        (idx - 1 + TERRITORIAL_SNAPSHOTS.length) % TERRITORIAL_SNAPSHOTS.length;
+    } else if (e.key === 'Home') {
+      nextIdx = 0;
+    } else if (e.key === 'End') {
+      nextIdx = TERRITORIAL_SNAPSHOTS.length - 1;
+    }
+    if (nextIdx !== null) {
+      e.preventDefault();
+      const nextSnap = TERRITORIAL_SNAPSHOTS[nextIdx];
+      if (nextSnap) {
+        onSelectSnapshot(nextSnap.id);
+        segmentRefs.current.get(nextSnap.id)?.focus();
+      }
+    }
+  };
+
+  // Mede o segmento ativo para deslizar a pílula única do Segmented Control via GPU
+  useLayoutEffect(() => {
+    const containerEl = segmentContainerRef.current;
+    if (!containerEl) return;
+
+    const measurePill = () => {
+      const activeBtn = segmentRefs.current.get(activeSnapshot);
+      if (!activeBtn) {
+        setSegmentPill({ x: 0, width: 0 });
+        return;
+      }
+      setSegmentPill({
+        x: activeBtn.offsetLeft,
+        width: activeBtn.offsetWidth,
+      });
+    };
+
+    measurePill();
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measurePill);
+    observer.observe(containerEl);
+    return () => observer.disconnect();
+  }, [activeSnapshot, showTerritorialOverlay]);
 
   // Mede posições reais dos marcos para deslizar o cursor e a barra de progresso via transform (GPU)
   useLayoutEffect(() => {
@@ -102,6 +174,59 @@ export function TimelineBar({
     return () => observer.disconnect();
   }, [events, selectedEventId]);
 
+  // Navegação pelos marcos com as setas do teclado (← / →), sem conflitar com outros controles
+  useEffect(() => {
+    if (events.length === 0) return;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.defaultPrevented ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        e.shiftKey
+      ) {
+        return;
+      }
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+        if (
+          target.closest(
+            '[role="radiogroup"], [role="radio"], [role="separator"], [role="listbox"], [aria-expanded="true"]'
+          )
+        ) {
+          return;
+        }
+      }
+
+      e.preventDefault();
+      const delta = e.key === 'ArrowRight' ? 1 : -1;
+      if (selectedEventIndex === -1) {
+        onSelectEvent(
+          delta === 1 ? events[0].id : events[events.length - 1].id
+        );
+        return;
+      }
+      const nextIndex =
+        (selectedEventIndex + delta + events.length) % events.length;
+      onSelectEvent(events[nextIndex].id);
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [events, selectedEventIndex, onSelectEvent]);
+
   // Garante visibilidade suave quando a trilha possui rolagem horizontal em telas menores
   useEffect(() => {
     if (!selectedEventId) return;
@@ -124,52 +249,67 @@ export function TimelineBar({
       className="relative z-20 shrink-0 border-t border-parchment-border bg-parchment-surface px-4 py-2.5"
     >
       <div className="flex flex-col gap-2">
-        {/* Linha 1: Time Slider de Recortes Territoriais */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted shrink-0">
-              Fronteiras
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={TERRITORIAL_SNAPSHOTS.length - 1}
-              step={1}
-              value={activeSnapshotIndex}
-              onChange={(e) => {
-                const idx = Number(e.target.value);
-                const snap = TERRITORIAL_SNAPSHOTS[idx];
-                if (snap) onSelectSnapshot(snap.id);
-              }}
-              aria-label="Selecionar recorte territorial histórico"
-              className="w-28 sm:w-36 accent-terracotta cursor-pointer"
-            />
-          </div>
+        {/* Linha 1: Segmented Control de Recortes Territoriais (seleção única com pílula deslizante) */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span
+            id="territorial-snapshots-label"
+            className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-muted shrink-0"
+          >
+            Fronteiras
+          </span>
 
           <div
-            className="flex flex-wrap items-center gap-1"
-            role="group"
-            aria-label="Marcos territoriais"
+            ref={segmentContainerRef}
+            role="radiogroup"
+            aria-labelledby="territorial-snapshots-label"
+            className="relative inline-flex items-center rounded-md border border-parchment-border bg-parchment p-0.5 overflow-x-auto max-w-full"
           >
-            {TERRITORIAL_SNAPSHOTS.map((snap) => {
+            {/* Pílula única deslizante que indica seleção exclusiva */}
+            {showTerritorialOverlay && segmentPill.width > 0 && (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-0 top-0.5 bottom-0.5 rounded shadow-sm transition-[transform,width,background-color] duration-200 ease-out motion-reduce:transition-none"
+                style={{
+                  width: `${segmentPill.width}px`,
+                  transform: `translate3d(${segmentPill.x}px, 0, 0)`,
+                  backgroundColor: activeSnapshotMeta.color,
+                }}
+              />
+            )}
+
+            {TERRITORIAL_SNAPSHOTS.map((snap, idx) => {
               const isActive =
                 showTerritorialOverlay && activeSnapshot === snap.id;
               return (
                 <button
                   key={snap.id}
+                  ref={(el) => {
+                    if (el) {
+                      segmentRefs.current.set(snap.id, el);
+                    } else {
+                      segmentRefs.current.delete(snap.id);
+                    }
+                  }}
                   type="button"
+                  role="radio"
+                  aria-checked={isActive}
+                  tabIndex={isActive ? 0 : -1}
                   onClick={() => onSelectSnapshot(snap.id)}
-                  aria-pressed={isActive}
-                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                  onKeyDown={(e) => handleSegmentKeyDown(e, idx)}
+                  className={`relative z-10 inline-flex items-center gap-1.5 whitespace-nowrap rounded px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-terracotta/50 ${
                     isActive
-                      ? 'text-parchment shadow-sm'
-                      : 'text-ink-muted hover:text-ink hover:bg-parchment'
+                      ? 'text-parchment font-semibold'
+                      : 'text-ink-muted hover:text-ink'
                   }`}
-                  style={
-                    isActive ? { backgroundColor: snap.color } : undefined
-                  }
                 >
-                  {snap.shortLabel}
+                  <span
+                    className="h-1.5 w-1.5 rounded-full shrink-0 transition-colors duration-150"
+                    style={{
+                      backgroundColor: isActive ? '#F5E8D5' : snap.color,
+                    }}
+                    aria-hidden="true"
+                  />
+                  <span>{snap.shortLabel}</span>
                 </button>
               );
             })}
@@ -184,7 +324,7 @@ export function TimelineBar({
             disabled={events.length === 0}
             className="group inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-parchment-border bg-parchment text-ink hover:bg-parchment-surface disabled:opacity-40 transition-colors"
             aria-label="Marco histórico anterior"
-            title="Anterior"
+            title="Anterior (←)"
           >
             <ChevronLeft className="w-4 h-4 transition-transform duration-150 group-hover:-translate-x-0.5 group-active:-translate-x-1 motion-reduce:transition-none" />
           </button>
@@ -299,7 +439,7 @@ export function TimelineBar({
             disabled={events.length === 0}
             className="group inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-parchment-border bg-parchment text-ink hover:bg-parchment-surface disabled:opacity-40 transition-colors"
             aria-label="Próximo marco histórico"
-            title="Próximo"
+            title="Próximo (→)"
           >
             <ChevronRight className="w-4 h-4 transition-transform duration-150 group-hover:translate-x-0.5 group-active:translate-x-1 motion-reduce:transition-none" />
           </button>
