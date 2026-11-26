@@ -24,6 +24,11 @@ import type {
   TheoreticalLensId,
 } from '../types';
 import { hasActiveFilters } from '../utils/filters';
+import {
+  EditorialSelect,
+  type EditorialSelectGroup,
+  type EditorialSelectOption,
+} from './EditorialSelect';
 
 export interface HeaderFiltersProps {
   readonly filters: AtlasFilterState;
@@ -51,6 +56,39 @@ const DIMENSION_ORDER: readonly DimensionId[] = [
   'politica',
 ];
 
+const LENS_GROUPS: readonly EditorialSelectGroup[] = [
+  {
+    label: 'Sérgio Buarque',
+    subtitle: 'Raízes do Brasil',
+    options: THEORETICAL_LENSES.filter((l) => l.author === 'sergio_buarque').map(
+      (lens) => ({
+        value: lens.id,
+        label: lens.shortLabel,
+        color: lens.accentColor,
+      })
+    ),
+  },
+  {
+    label: 'Darcy Ribeiro',
+    subtitle: 'O Povo Brasileiro',
+    options: THEORETICAL_LENSES.filter((l) => l.author === 'darcy_ribeiro').map(
+      (lens) => ({
+        value: lens.id,
+        label: lens.shortLabel,
+        color: lens.accentColor,
+      })
+    ),
+  },
+];
+
+const THREAD_OPTIONS: readonly EditorialSelectOption[] = CONTINUITY_THREADS.map(
+  (thread) => ({
+    value: thread.id,
+    label: thread.title,
+    color: thread.color,
+  })
+);
+
 export function HeaderFilters({
   filters,
   layers,
@@ -69,15 +107,8 @@ export function HeaderFilters({
 }: HeaderFiltersProps) {
   const filtersActive = hasActiveFilters(filters);
 
-  const buarqueLenses = THEORETICAL_LENSES.filter(
-    (l) => l.author === 'sergio_buarque'
-  );
-  const darcyLenses = THEORETICAL_LENSES.filter(
-    (l) => l.author === 'darcy_ribeiro'
-  );
-
   return (
-    <header className="shrink-0 border-b border-parchment-border bg-parchment-surface/95 backdrop-blur-sm z-20">
+    <header className="relative shrink-0 border-b border-parchment-border bg-parchment-surface z-20">
       {/* Linha superior: Título editorial, contador e ações */}
       <div className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-parchment-border/70">
         <button
@@ -232,33 +263,20 @@ export function HeaderFilters({
 
           {/* Seletor de Lente Teórica */}
           <div className="inline-flex items-center gap-1">
-            <label htmlFor="lens-select" className="sr-only">
-              Lente Teórica
-            </label>
-            <select
-              id="lens-select"
+            <EditorialSelect
               value={filters.selectedLens}
-              onChange={(e) =>
-                onChangeLens(e.target.value as TheoreticalLensId | 'all')
+              onChange={(val) =>
+                onChangeLens(val as TheoreticalLensId | 'all')
               }
-              className="rounded-md border border-parchment-border bg-parchment px-2.5 py-1 text-xs font-medium text-ink focus:border-terracotta focus:outline-none"
-            >
-              <option value="all">Lente Teórica: Todas</option>
-              <optgroup label="Sérgio Buarque de Holanda (Raízes do Brasil)">
-                {buarqueLenses.map((lens) => (
-                  <option key={lens.id} value={lens.id}>
-                    {lens.shortLabel}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Darcy Ribeiro (O Povo Brasileiro)">
-                {darcyLenses.map((lens) => (
-                  <option key={lens.id} value={lens.id}>
-                    {lens.shortLabel}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
+              prefixLabel="Lente"
+              allOptionLabel="Todas"
+              allValue="all"
+              groups={LENS_GROUPS}
+              icon={<BookOpen className="w-3.5 h-3.5" />}
+              ariaLabel="Filtrar por Lente Teórica"
+              maxWidthClassName="max-w-[210px]"
+              menuWidthClassName="w-64"
+            />
 
             {filters.selectedLens !== 'all' && (
               <button
@@ -276,26 +294,18 @@ export function HeaderFilters({
           </div>
 
           {/* Seletor rápido de Fio de Continuidade */}
-          <div className="inline-flex items-center">
-            <label htmlFor="thread-select" className="sr-only">
-              Fio de Continuidade
-            </label>
-            <select
-              id="thread-select"
-              value={filters.selectedThreadId ?? ''}
-              onChange={(e) =>
-                onChangeThread(e.target.value === '' ? null : e.target.value)
-              }
-              className="rounded-md border border-parchment-border bg-parchment px-2.5 py-1 text-xs font-medium text-ink focus:border-terracotta focus:outline-none max-w-[210px]"
-            >
-              <option value="">Fio de Continuidade: Todos</option>
-              {CONTINUITY_THREADS.map((thread) => (
-                <option key={thread.id} value={thread.id}>
-                  {thread.title}
-                </option>
-              ))}
-            </select>
-          </div>
+          <EditorialSelect
+            value={filters.selectedThreadId ?? ''}
+            onChange={(val) => onChangeThread(val === '' ? null : val)}
+            prefixLabel="Fio"
+            allOptionLabel="Todos"
+            allValue=""
+            options={THREAD_OPTIONS}
+            icon={<GitBranch className="w-3.5 h-3.5" />}
+            ariaLabel="Filtrar por Fio de Continuidade"
+            maxWidthClassName="max-w-[230px]"
+            menuWidthClassName="w-72"
+          />
         </div>
 
         {/* Grupo direito: Camadas Cartográficas */}

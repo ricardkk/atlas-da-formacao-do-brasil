@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --color-parchment: #f7f3e9;
-  --color-parchment-surface: #efe9da;
-  --color-parchment-border: #dcd3be;
+  --color-parchment: #f5e8d5;
+  --color-parchment-surface: #ecdac0;
+  --color-parchment-border: #d5b892;
   --color-ink: #1e242b;
   --color-ink-muted: #555b61;
   --color-terracotta: #b85336;
@@ -31,5 +31,58 @@
   h4 {
     font-family: var(--font-serif);
     color: var(--color-ink);
+  }
+}
+
+/* Modo de leitura com fonte grande no painel editorial */
+.drawer-large-font .text-\[10px\] {
+  font-size: 0.78rem;
+  line-height: 1.15rem;
+}
+.drawer-large-font .text-\[11px\] {
+  font-size: 0.875rem;
+  line-height: 1.35rem;
+}
+.drawer-large-font .text-xs {
+  font-size: 0.95rem;
+  line-height: 1.5rem;
+}
+.drawer-large-font .text-sm {
+  font-size: 1.075rem;
+  line-height: 1.7rem;
+}
+.drawer-large-font .text-base {
+  font-size: 1.2rem;
+  line-height: 1.75rem;
+}
+.drawer-large-font .text-lg {
+  font-size: 1.375rem;
+  line-height: 1.85rem;
+}
+.drawer-large-font .text-2xl {
+  font-size: 1.9rem;
+  line-height: 2.3rem;
+}
+
+/* Pulso leve de chegada ao avançar/selecionar marco na linha do tempo (GPU-only) */
+@keyframes timeline-arrival-pulse {
+  0% {
+    transform: scale(0.75);
+    opacity: 0.75;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+.animate-timeline-arrival {
+  animation: timeline-arrival-pulse 380ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-timeline-arrival {
+    animation: none;
+    opacity: 0;
   }
 }

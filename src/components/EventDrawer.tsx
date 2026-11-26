@@ -1,4 +1,12 @@
 import {
+  useCallback,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import {
   ArrowLeft,
   ArrowUpRight,
   BookOpen,
@@ -56,6 +64,19 @@ const PATTERN_LABELS: Record<string, string> = {
   cross: 'Cruzado (fronteira norte)',
 };
 
+const DEFAULT_DRAWER_WIDTH = 420;
+const MIN_DRAWER_WIDTH = 320;
+const MAX_DRAWER_WIDTH = 760;
+
+function clampDrawerWidth(width: number): number {
+  const viewportMax =
+    typeof window !== 'undefined'
+      ? Math.max(MIN_DRAWER_WIDTH, Math.floor(window.innerWidth * 0.65))
+      : MAX_DRAWER_WIDTH;
+  const maxWidth = Math.min(MAX_DRAWER_WIDTH, viewportMax);
+  return Math.min(maxWidth, Math.max(MIN_DRAWER_WIDTH, Math.round(width)));
+}
+
 export function EventDrawer({
   selection,
   isOpen,
@@ -67,15 +88,121 @@ export function EventDrawer({
   onSelectIndigenous,
   onSelectLens,
 }: EventDrawerProps) {
+  const [drawerWidth, setDrawerWidth] = useState<number>(DEFAULT_DRAWER_WIDTH);
+  const [isResizing, setIsResizing] = useState<boolean>(false);
+  const [isLargeFont, setIsLargeFont] = useState<boolean>(false);
+  const resizeOriginRef = useRef<{ startX: number; startWidth: number } | null>(
+    null
+  );
+
+  const handleResizePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // noop
+      }
+      resizeOriginRef.current = {
+        startX: e.clientX,
+        startWidth: drawerWidth,
+      };
+      setIsResizing(true);
+    },
+    [drawerWidth]
+  );
+
+  const handleResizePointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      const origin = resizeOriginRef.current;
+      if (!origin) return;
+      const delta = origin.startX - e.clientX;
+      setDrawerWidth(clampDrawerWidth(origin.startWidth + delta));
+    },
+    []
+  );
+
+  const handleResizePointerUp = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!resizeOriginRef.current) return;
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        // noop
+      }
+      resizeOriginRef.current = null;
+      setIsResizing(false);
+    },
+    []
+  );
+
+  const handleResizeKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setDrawerWidth((w) => clampDrawerWidth(w + 24));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setDrawerWidth((w) => clampDrawerWidth(w - 24));
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        setDrawerWidth(DEFAULT_DRAWER_WIDTH);
+      }
+    },
+    []
+  );
+
   if (!isOpen) return null;
 
   return (
     <aside
       aria-label="Painel editorial do Atlas"
-      className="fixed inset-y-0 right-0 z-30 w-full max-w-[420px] lg:static lg:w-[410px] xl:w-[430px] shrink-0 border-l border-parchment-border bg-parchment flex flex-col shadow-xl lg:shadow-none"
+      style={{ '--drawer-width': `${drawerWidth}px` } as CSSProperties}
+      className={`fixed inset-y-0 right-0 z-30 w-full max-w-[420px] lg:relative lg:max-w-none lg:w-[var(--drawer-width)] shrink-0 border-l border-parchment-border bg-parchment flex flex-col shadow-xl lg:shadow-none ${
+        isResizing ? 'select-none' : ''
+      }`}
     >
+      {/* Alça de redimensionamento na borda esquerda (desktop) */}
+      <div
+        role="separator"
+        tabIndex={0}
+        aria-orientation="vertical"
+        aria-label="Arraste para redimensionar a largura do painel"
+        aria-valuemin={MIN_DRAWER_WIDTH}
+        aria-valuemax={MAX_DRAWER_WIDTH}
+        aria-valuenow={drawerWidth}
+        title="Arraste para ajustar a largura (duplo clique para restaurar)"
+        onPointerDown={handleResizePointerDown}
+        onPointerMove={handleResizePointerMove}
+        onPointerUp={handleResizePointerUp}
+        onPointerCancel={handleResizePointerUp}
+        onLostPointerCapture={handleResizePointerUp}
+        onDoubleClick={() => setDrawerWidth(DEFAULT_DRAWER_WIDTH)}
+        onKeyDown={handleResizeKeyDown}
+        className="hidden lg:flex absolute inset-y-0 -left-1.5 w-3 cursor-col-resize items-center justify-center group z-20 focus:outline-none"
+      >
+        <span
+          className={`h-full w-0.5 transition-colors duration-150 ${
+            isResizing
+              ? 'bg-terracotta'
+              : 'bg-transparent group-hover:bg-terracotta/50 group-focus-visible:bg-terracotta'
+          }`}
+        />
+        <span
+          aria-hidden="true"
+          className={`absolute h-10 w-1 rounded-full transition-colors duration-150 ${
+            isResizing
+              ? 'bg-terracotta'
+              : 'bg-parchment-border group-hover:bg-terracotta/80'
+          }`}
+        />
+      </div>
+
       {/* Barra superior do painel */}
-      <div className="shrink-0 flex items-center justify-between gap-2 px-5 py-3 border-b border-parchment-border bg-parchment-surface/75">
+      <div className="shrink-0 flex items-center justify-between gap-2 px-5 py-3 border-b border-parchment-border bg-parchment-surface">
         {selection.kind !== 'overview' ? (
           <button
             type="button"
@@ -92,19 +219,49 @@ export function EventDrawer({
           </span>
         )}
 
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-1 text-ink-muted hover:bg-parchment-surface hover:text-ink transition-colors"
-          aria-label="Recolher painel editorial"
-          title="Recolher painel"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setIsLargeFont((prev) => !prev)}
+            aria-pressed={isLargeFont}
+            aria-label={
+              isLargeFont
+                ? 'Desativar fonte grande no painel'
+                : 'Ativar fonte grande no painel'
+            }
+            title={
+              isLargeFont
+                ? 'Voltar ao tamanho padrão da fonte'
+                : 'Aumentar tamanho da fonte'
+            }
+            className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition-colors ${
+              isLargeFont
+                ? 'border-terracotta/55 bg-terracotta/14 text-terracotta'
+                : 'border-parchment-border bg-parchment text-ink-muted hover:bg-parchment-surface hover:text-ink'
+            }`}
+          >
+            <span className="font-serif text-sm font-bold leading-none">A+</span>
+            <span className="hidden sm:inline text-[11px]">Fonte grande</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-ink-muted hover:bg-parchment hover:text-ink transition-colors"
+            aria-label="Recolher painel editorial"
+            title="Recolher painel"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Corpo com rolagem interna suave */}
-      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
+      <div
+        className={`flex-1 overflow-y-auto px-5 py-5 space-y-6 ${
+          isLargeFont ? 'drawer-large-font' : ''
+        }`}
+      >
         {selection.kind === 'overview' && (
           <OverviewContent
             onSelectLens={onSelectLens}
@@ -799,11 +956,15 @@ function BrasilDetailContent({
         </div>
       </div>
 
-      {/* UFs principais e zonas de transição */}
+      {/* UFs de núcleo e abrangência transestadual */}
       <section className="space-y-2 pt-2 border-t border-parchment-border">
+        <p className="text-[11px] italic text-ink-muted leading-snug">
+          No mapa, esta macroárea segue fronteiras histórico-culturais contínuas
+          (ultrapassando divisas estaduais rígidas).
+        </p>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted mb-1">
-            UFs Principais no Mapa
+            UFs Predominantes
           </p>
           <div className="flex flex-wrap gap-1">
             {brasil.states.map((uf) => (
