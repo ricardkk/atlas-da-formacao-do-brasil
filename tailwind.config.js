@@ -5,9 +5,9 @@ export default {
     extend: {
       colors: {
         parchment: {
-          DEFAULT: '#F7F3E9',
-          surface: '#EFE9DA',
-          border: '#DCD3BE',
+          DEFAULT: '#F5E8D5',
+          surface: '#ECDAC0',
+          border: '#D5B892',
         },
         ink: {
           DEFAULT: '#1E242B',

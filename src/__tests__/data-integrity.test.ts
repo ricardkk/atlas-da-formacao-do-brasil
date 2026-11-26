@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { geoArea, geoContains } from 'd3-geo';
 import brazilStatesTopology from '../data/geo/brazil-states.json';
 import {
   CARTOGRAPHIC_NOTES,
+  DARCY_BRASIS_REFERENCE_CITIES,
+  DARCY_BRASIS_REGIONS,
   IMPERIAL_PROVINCE_GROUPS_1850,
 } from '../data/geo/historical-layers';
 import {
@@ -82,6 +85,37 @@ describe('Integridade dos dados históricos e cartográficos', () => {
     expect(assigned).toHaveLength(27);
     expect(new Set(assigned).size).toBe(27);
     expect(assigned.slice().sort()).toEqual(ALL_27_UFS.slice().sort());
+  });
+
+  it('modela os 5 Brasis como polígonos culturais contínuos válidos no d3-geo e classifica corretamente as cidades-referência', () => {
+    expect(DARCY_BRASIS_REGIONS).toHaveLength(5);
+    const regionIds = DARCY_BRASIS_REGIONS.map((r) => r.id).sort();
+    const expectedIds = DARCY_BRASIS.map((b) => b.id).sort();
+    expect(regionIds).toEqual(expectedIds);
+
+    const geoPolys = new Map(
+      DARCY_BRASIS_REGIONS.map((r) => {
+        const poly: GeoJSON.Polygon = {
+          type: 'Polygon',
+          coordinates: [r.ring.map(([lon, lat]) => [lon, lat])],
+        };
+        const area = geoArea(poly);
+        // Garante orientação horária válida (sem inversão esférica no d3-geo)
+        expect(area, `Área esférica inválida em ${r.id}`).toBeGreaterThan(0);
+        expect(area, `Polígono invertido em ${r.id}`).toBeLessThan(1.5);
+        return [r.id, poly] as const;
+      })
+    );
+
+    expect(DARCY_BRASIS_REFERENCE_CITIES).toHaveLength(5);
+    for (const city of DARCY_BRASIS_REFERENCE_CITIES) {
+      expectValidBrazilCoords(city.coordinates, `Cidade ${city.name}`);
+      const targetPoly = geoPolys.get(city.brasilId)!;
+      expect(
+        geoContains(targetPoly, [city.coordinates[0], city.coordinates[1]]),
+        `${city.name} deveria estar contida em ${city.brasilId}`
+      ).toBe(true);
+    }
   });
 
   it('contém exatamente as 27 UFs válidas na malha TopoJSON local (brazil-states.json)', () => {

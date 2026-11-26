@@ -1,4 +1,5 @@
 import type {
+  DarcyBrasilId,
   IndigenousTrunkId,
   LngLat,
   StateCode,
@@ -588,6 +589,234 @@ export const CARTOGRAPHIC_NOTES: readonly CartographicNote[] = [
     title: 'Paraná integrado à Província de São Paulo',
     explanation:
       'Em 1850, o território do atual estado do Paraná ainda fazia parte da Província de São Paulo como sua 5ª Comarca (Comarca de Curitiba). A emancipação da Província do Paraná ocorreu apenas em 1853.',
+  },
+];
+
+/* ============================================================================
+ * OS 5 BRASIS DE DARCY RIBEIRO — ZONAS CULTURAIS CONTÍNUAS (SEM DIVISAS RÍGIDAS)
+ * ============================================================================ */
+
+const BRASIS_TRIPLE_WEST: LngLat = [-55.4, -13.3];
+const BRASIS_TRIPLE_EAST: LngLat = [-40.4, -17.0];
+
+/** Fronteira SE do Brasil Caboclo (trecho oeste: Bolívia/MT -> ponto triplo no leste de MT). */
+const CABOCLO_TO_TRIPLE_WEST: readonly LngLat[] = [
+  [-62.5, -16.2],
+  [-60.5, -15.6],
+  [-58.8, -15.0],
+  [-57.0, -14.2],
+  BRASIS_TRIPLE_WEST,
+];
+
+/** Fronteira SE do Brasil Caboclo (trecho leste: ponto triplo em MT -> litoral leste de Belém PA/MA). */
+const TRIPLE_WEST_TO_NORTH_COAST: readonly LngLat[] = [
+  BRASIS_TRIPLE_WEST,
+  [-53.8, -11.9],
+  [-52.1, -10.2],
+  [-50.5, -8.3],
+  [-49.0, -6.3],
+  [-47.7, -4.3],
+  [-46.6, -2.5],
+  [-45.8, -1.1],
+  [-45.1, 0.2],
+];
+
+/** Fronteira interior do Brasil Crioulo (trecho norte/central: litoral norte do RN -> ponto triplo norte MG/sul BA). */
+const NORTH_RN_TO_TRIPLE_EAST: readonly LngLat[] = [
+  [-34.8, -4.5],
+  [-35.5, -5.2],
+  [-36.1, -6.3],
+  [-36.4, -7.6],
+  [-37.0, -8.9],
+  [-37.9, -10.2],
+  [-38.8, -11.5],
+  [-39.6, -12.9],
+  [-40.1, -14.4],
+  [-40.3, -15.8],
+  BRASIS_TRIPLE_EAST,
+];
+
+/** Fronteira sul do Brasil Crioulo até a costa extremo-sul da Bahia / divisa ES. */
+const TRIPLE_EAST_TO_SOUTH_BA: readonly LngLat[] = [
+  BRASIS_TRIPLE_EAST,
+  [-39.9, -17.7],
+  [-39.2, -18.3],
+  [-38.3, -18.8],
+];
+
+/** Fronteira sul do Brasil Sertanejo com o Brasil Caipira (contornando ao sul de Goiânia e arqueando sobre MG). */
+const SERTANEJO_TO_CAIPIRA: readonly LngLat[] = [
+  BRASIS_TRIPLE_WEST,
+  [-53.8, -14.6],
+  [-52.2, -16.1],
+  [-50.7, -17.6],
+  [-49.3, -18.5],
+  [-47.8, -17.9],
+  [-46.2, -16.9],
+  [-44.5, -16.3],
+  [-42.8, -16.3],
+  [-41.5, -16.6],
+  BRASIS_TRIPLE_EAST,
+];
+
+/** Fronteira entre o Brasil Caipira e os Brasis Sulinos (atravessando o Paraná do rio Paraná ao litoral). */
+const CAIPIRA_TO_SULINO: readonly LngLat[] = [
+  [-55.6, -24.3],
+  [-54.3, -24.1],
+  [-53.0, -23.9],
+  [-51.7, -24.2],
+  [-50.4, -24.8],
+  [-49.3, -25.4],
+  [-48.3, -25.85],
+  [-47.3, -26.3],
+];
+
+function reverseCoords(coords: readonly LngLat[]): LngLat[] {
+  return coords.slice().reverse();
+}
+
+export interface DarcyBrasilRegion {
+  readonly id: DarcyBrasilId;
+  readonly legendLabel: string;
+  readonly fillColor: string;
+  /** Anel fechado em sentido horário (convenção esférica d3-geo), recortado pela silhueta do Brasil. */
+  readonly ring: readonly LngLat[];
+}
+
+/**
+ * Cinco macroáreas culturais contínuas de Darcy Ribeiro (*O Povo Brasileiro*),
+ * construídas com bordas compartilhadas exatas (sem frestas nem rigidez estadual)
+ * e recortadas pela silhueta territorial brasileira no SVG.
+ */
+export const DARCY_BRASIS_REGIONS: readonly DarcyBrasilRegion[] = [
+  {
+    id: 'caboclo',
+    legendLabel: 'Brasil Caboclo',
+    fillColor: '#2F5D50',
+    ring: [
+      [-76.0, 7.0],
+      [-45.1, 7.0],
+      [-45.1, 0.2],
+      ...reverseCoords(TRIPLE_WEST_TO_NORTH_COAST).slice(1),
+      ...reverseCoords(CABOCLO_TO_TRIPLE_WEST).slice(1),
+      [-76.0, -16.2],
+      [-76.0, 7.0],
+    ],
+  },
+  {
+    id: 'sertanejo',
+    legendLabel: 'Brasil Sertanejo',
+    fillColor: '#C78A3B',
+    ring: [
+      [-45.1, 0.2],
+      [-34.8, 0.2],
+      ...NORTH_RN_TO_TRIPLE_EAST,
+      ...reverseCoords(SERTANEJO_TO_CAIPIRA).slice(1),
+      ...TRIPLE_WEST_TO_NORTH_COAST.slice(1),
+    ],
+  },
+  {
+    id: 'crioulo',
+    legendLabel: 'Brasil Crioulo',
+    fillColor: '#B85336',
+    ring: [
+      [-34.8, -4.5],
+      [-31.5, -4.5],
+      [-31.5, -18.8],
+      [-38.3, -18.8],
+      ...reverseCoords(TRIPLE_EAST_TO_SOUTH_BA).slice(1),
+      ...reverseCoords(NORTH_RN_TO_TRIPLE_EAST).slice(1),
+    ],
+  },
+  {
+    id: 'caipira',
+    legendLabel: 'Brasil Caipira',
+    fillColor: '#6E5A47',
+    ring: [
+      [-62.5, -16.2],
+      ...CABOCLO_TO_TRIPLE_WEST.slice(1),
+      ...SERTANEJO_TO_CAIPIRA.slice(1),
+      ...TRIPLE_EAST_TO_SOUTH_BA.slice(1),
+      [-38.3, -26.3],
+      [-47.3, -26.3],
+      ...reverseCoords(CAIPIRA_TO_SULINO).slice(1),
+      [-62.5, -24.3],
+      [-62.5, -16.2],
+    ],
+  },
+  {
+    id: 'sulino',
+    legendLabel: 'Brasis Sulinos',
+    fillColor: '#2B4570',
+    ring: [
+      [-60.0, -24.3],
+      [-55.6, -24.3],
+      ...CAIPIRA_TO_SULINO.slice(1),
+      [-47.3, -35.5],
+      [-60.0, -35.5],
+      [-60.0, -24.3],
+    ],
+  },
+];
+
+/** Curvas internas pontilhadas que separam organicamente os 5 Brasis no mapa. */
+export const DARCY_BRASIS_BOUNDARIES: readonly (readonly LngLat[])[] = [
+  [...CABOCLO_TO_TRIPLE_WEST, ...TRIPLE_WEST_TO_NORTH_COAST.slice(1)],
+  [...NORTH_RN_TO_TRIPLE_EAST, ...TRIPLE_EAST_TO_SOUTH_BA.slice(1)],
+  SERTANEJO_TO_CAIPIRA,
+  CAIPIRA_TO_SULINO,
+];
+
+export interface DarcyBrasilReferenceCity {
+  readonly name: string;
+  readonly brasilId: DarcyBrasilId;
+  readonly coordinates: LngLat;
+  readonly dx: number;
+  readonly dy: number;
+  readonly anchor: 'start' | 'end';
+}
+
+/** Cidades-referência clássicas do mapa dos 5 Brasis de Darcy Ribeiro. */
+export const DARCY_BRASIS_REFERENCE_CITIES: readonly DarcyBrasilReferenceCity[] = [
+  {
+    name: 'Belém',
+    brasilId: 'caboclo',
+    coordinates: [-48.49, -1.46],
+    dx: 6,
+    dy: 3,
+    anchor: 'start',
+  },
+  {
+    name: 'Recife',
+    brasilId: 'crioulo',
+    coordinates: [-34.88, -8.05],
+    dx: 7,
+    dy: 3,
+    anchor: 'start',
+  },
+  {
+    name: 'Goiânia',
+    brasilId: 'sertanejo',
+    coordinates: [-49.26, -16.68],
+    dx: 6,
+    dy: 3,
+    anchor: 'start',
+  },
+  {
+    name: 'São Paulo',
+    brasilId: 'caipira',
+    coordinates: [-46.63, -23.55],
+    dx: 6,
+    dy: 3,
+    anchor: 'start',
+  },
+  {
+    name: 'Porto Alegre',
+    brasilId: 'sulino',
+    coordinates: [-51.23, -30.03],
+    dx: 7,
+    dy: 3,
+    anchor: 'start',
   },
 ];
 

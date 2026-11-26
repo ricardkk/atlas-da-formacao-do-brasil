@@ -161,7 +161,13 @@ export function App() {
   }, []);
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-parchment text-ink flex flex-col">
+    <div
+      className="relative h-screen w-screen overflow-hidden bg-parchment text-ink flex flex-col"
+      style={{
+        backgroundImage:
+          'radial-gradient(ellipse at center, transparent 46%, rgba(176, 94, 38, 0.15) 100%), radial-gradient(circle at 22% 18%, rgba(206, 118, 48, 0.11), transparent 58%), radial-gradient(circle at 82% 76%, rgba(184, 83, 54, 0.085), transparent 56%), repeating-linear-gradient(0deg, rgba(138, 74, 30, 0.018) 0px, rgba(138, 74, 30, 0.018) 1px, transparent 1px, transparent 4px)',
+      }}
+    >
       <HeaderFilters
         filters={filters}
         layers={layers}
@@ -179,10 +185,10 @@ export function App() {
         onGoOverview={handleGoOverview}
       />
 
-      <div className="flex-1 min-h-0 flex relative overflow-hidden">
+      <div className="flex-1 min-h-0 flex relative">
         {/* Coluna principal: Mapa Vetorial + Barra Cronológica */}
         <main className="flex-1 min-w-0 flex flex-col">
-          <div className="flex-1 min-h-0 relative">
+          <div className="flex-1 min-h-0 relative z-0">
             <MapCanvas
               events={visibleEvents}
               layers={layers}

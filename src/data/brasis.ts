@@ -18,7 +18,7 @@ export const DARCY_BRASIS: readonly DarcyBrasil[] = [
     name: 'Brasil Crioulo',
     subtitle: 'Engenhos, Casa-Grande, Senzala e Cultura Afro-Brasileira',
     states: ['RN', 'PB', 'PE', 'AL', 'SE', 'BA'],
-    centroid: [-38.5, -10.8],
+    centroid: [-36.2, -13.2],
     color: '#B85336',
     economicBase:
       'Empresa açucareira escravista na Zona da Mata e no Recôncavo, articulada ao tráfico atlântico e posteriormente convertida em usinas e polos portuários.',
@@ -41,7 +41,7 @@ export const DARCY_BRASIS: readonly DarcyBrasil[] = [
     name: 'Brasil Caboclo',
     subtitle: 'Bacia Amazônica, Povos da Floresta e Ciclos Extrativos',
     states: ['AC', 'AM', 'AP', 'PA', 'RO', 'RR', 'MA'],
-    centroid: [-59.5, -4.2],
+    centroid: [-59.5, -5.0],
     color: '#2F5D50',
     economicBase:
       'Extrativismo florestal ("drogas da mata", borracha, castanha), pesca ribeirinha, agricultura de várzea e frentes contemporâneas de mineração e agropecuária.',
@@ -63,7 +63,7 @@ export const DARCY_BRASIS: readonly DarcyBrasil[] = [
     name: 'Brasil Sertanejo',
     subtitle: 'Currais, Caatinga, Cerrado e Resistência Messianista',
     states: ['CE', 'PI', 'TO', 'GO', 'DF'],
-    centroid: [-44.5, -9.8],
+    centroid: [-44.8, -10.2],
     color: '#C78A3B',
     economicBase:
       'Pastoreio extensivo nascido como economia subsidiária do açúcar (sistema da quarta), cultivo de algodão mocó, agricultura de subsistência e, a partir de meados do século XX, expansão agroindustrial no Cerrado.',
@@ -84,7 +84,7 @@ export const DARCY_BRASIS: readonly DarcyBrasil[] = [
     name: 'Brasil Caipira',
     subtitle: 'Bandeiras, Mineração, Café e Metrópole Industrial',
     states: ['SP', 'MG', 'RJ', 'ES', 'MT', 'MS'],
-    centroid: [-47.8, -20.5],
+    centroid: [-50.2, -20.8],
     color: '#6E5A47',
     economicBase:
       'Economia inicial de pobreza e bandeiras paulistas, mineração aurífera em Minas, Mato Grosso e Goiás, agricultura camponesa de mutirão, marcha do café e industrialização urbano-fabril.',
@@ -109,7 +109,7 @@ export const DARCY_BRASIS: readonly DarcyBrasil[] = [
     name: 'Brasis Sulinos',
     subtitle: 'Gaúchos, Matutos e Gringos na Fronteira Meridional',
     states: ['PR', 'SC', 'RS'],
-    centroid: [-51.8, -27.5],
+    centroid: [-52.2, -28.2],
     color: '#2B4570',
     economicBase:
       'Pecuária extensiva e charqueadas da campanha gaúcha, exploração ervateira e madeireira do planalto, pequenas propriedades policultoras de colonos europeus e indústria artesanal-fabril.',
