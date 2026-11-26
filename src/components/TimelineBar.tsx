@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { ERAS, TERRITORIAL_SNAPSHOTS } from '../data';
 import type { HistoricalEvent, TerritorialSnapshotId } from '../types';
@@ -11,6 +12,12 @@ export interface TimelineBarProps {
   readonly onSelectEvent: (eventId: string) => void;
 }
 
+interface TrackMetrics {
+  readonly firstX: number;
+  readonly spanWidth: number;
+  readonly activeX: number | null;
+}
+
 export function TimelineBar({
   events,
   selectedEventId,
@@ -19,6 +26,14 @@ export function TimelineBar({
   onSelectSnapshot,
   onSelectEvent,
 }: TimelineBarProps) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const [metrics, setMetrics] = useState<TrackMetrics>({
+    firstX: 8,
+    spanWidth: 0,
+    activeX: null,
+  });
+
   const activeSnapshotIndex = Math.max(
     0,
     TERRITORIAL_SNAPSHOTS.findIndex((s) => s.id === activeSnapshot)
@@ -27,6 +42,12 @@ export function TimelineBar({
   const selectedEventIndex = selectedEventId
     ? events.findIndex((ev) => ev.id === selectedEventId)
     : -1;
+
+  const selectedEvent =
+    selectedEventIndex >= 0 ? events[selectedEventIndex] : null;
+  const activeColor = selectedEvent
+    ? ERAS[selectedEvent.era].color
+    : '#B85336';
 
   const handleStep = (delta: -1 | 1) => {
     if (events.length === 0) return;
@@ -41,10 +62,66 @@ export function TimelineBar({
     onSelectEvent(events[nextIndex].id);
   };
 
+  // Mede posições reais dos marcos para deslizar o cursor e a barra de progresso via transform (GPU)
+  useLayoutEffect(() => {
+    const trackEl = trackRef.current;
+    if (!trackEl || events.length === 0) {
+      setMetrics({ firstX: 8, spanWidth: 0, activeX: null });
+      return;
+    }
+
+    const measure = () => {
+      const firstBtn = itemRefs.current.get(events[0].id);
+      const lastBtn = itemRefs.current.get(events[events.length - 1].id);
+      const activeBtn = selectedEventId
+        ? itemRefs.current.get(selectedEventId)
+        : undefined;
+
+      const firstX = firstBtn
+        ? firstBtn.offsetLeft + firstBtn.offsetWidth / 2
+        : 8;
+      const lastX = lastBtn
+        ? lastBtn.offsetLeft + lastBtn.offsetWidth / 2
+        : trackEl.clientWidth - 8;
+      const activeX = activeBtn
+        ? activeBtn.offsetLeft + activeBtn.offsetWidth / 2
+        : null;
+
+      setMetrics({
+        firstX,
+        spanWidth: Math.max(0, lastX - firstX),
+        activeX,
+      });
+    };
+
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(trackEl);
+    return () => observer.disconnect();
+  }, [events, selectedEventId]);
+
+  // Garante visibilidade suave quando a trilha possui rolagem horizontal em telas menores
+  useEffect(() => {
+    if (!selectedEventId) return;
+    const btn = itemRefs.current.get(selectedEventId);
+    btn?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+      inline: 'nearest',
+    });
+  }, [selectedEventId]);
+
+  const progressScale =
+    metrics.activeX !== null && metrics.spanWidth > 0
+      ? Math.min(1, Math.max(0, (metrics.activeX - metrics.firstX) / metrics.spanWidth))
+      : 0;
+
   return (
     <section
       aria-label="Linha do tempo e recortes territoriais"
-      className="shrink-0 border-t border-parchment-border bg-parchment-surface/95 backdrop-blur-sm px-4 py-2.5"
+      className="relative z-20 shrink-0 border-t border-parchment-border bg-parchment-surface px-4 py-2.5"
     >
       <div className="flex flex-col gap-2">
         {/* Linha 1: Time Slider de Recortes Territoriais */}
@@ -105,11 +182,11 @@ export function TimelineBar({
             type="button"
             onClick={() => handleStep(-1)}
             disabled={events.length === 0}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-parchment-border bg-parchment text-ink hover:bg-parchment-surface disabled:opacity-40 transition-colors"
+            className="group inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-parchment-border bg-parchment text-ink hover:bg-parchment-surface disabled:opacity-40 transition-colors"
             aria-label="Marco histórico anterior"
             title="Anterior"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-4 h-4 transition-transform duration-150 group-hover:-translate-x-0.5 group-active:-translate-x-1 motion-reduce:transition-none" />
           </button>
 
           <div className="relative flex-1 flex items-center gap-1 overflow-x-auto py-1 px-1">
@@ -118,12 +195,57 @@ export function TimelineBar({
                 Nenhum marco histórico corresponde aos filtros atuais.
               </p>
             ) : (
-              <div className="relative flex items-center justify-between w-full min-w-[420px] px-1">
-                {/* Linha horizontal de fundo */}
+              <div
+                ref={trackRef}
+                className="relative flex items-start justify-between w-full min-w-[420px] px-1"
+              >
+                {/* Linha horizontal base */}
                 <div
-                  className="pointer-events-none absolute left-2 right-2 top-1/2 -translate-y-1/2 h-px bg-parchment-border"
+                  className="pointer-events-none absolute top-2 -translate-y-1/2 h-[2px] bg-parchment-border rounded-full"
+                  style={{
+                    left: `${metrics.firstX}px`,
+                    width: `${metrics.spanWidth}px`,
+                  }}
                   aria-hidden="true"
                 />
+
+                {/* Barra de progresso animada via scaleX (GPU-only) */}
+                {metrics.activeX !== null && metrics.spanWidth > 0 && (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute top-2 -translate-y-1/2 h-[2px] origin-left rounded-full transition-transform duration-300 ease-out motion-reduce:transition-none"
+                    style={{
+                      left: `${metrics.firstX}px`,
+                      width: `${metrics.spanWidth}px`,
+                      backgroundColor: activeColor,
+                      transform: `scaleX(${progressScale})`,
+                    }}
+                  />
+                )}
+
+                {/* Cursor viajante deslizante entre o marco anterior e o próximo (translate3d GPU-only) */}
+                {metrics.activeX !== null && (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-0 top-2 z-20 transition-transform duration-300 ease-out motion-reduce:transition-none"
+                    style={{
+                      transform: `translate3d(${metrics.activeX}px, -50%, 0)`,
+                    }}
+                  >
+                    <span
+                      className="block -ml-[9px] h-[18px] w-[18px] rounded-full border-2 shadow-sm transition-colors duration-200"
+                      style={{
+                        borderColor: activeColor,
+                        backgroundColor: 'rgba(245, 232, 213, 0.45)',
+                      }}
+                    />
+                    <span
+                      key={selectedEventId}
+                      className="animate-timeline-arrival pointer-events-none absolute inset-0 -ml-[9px] h-[18px] w-[18px] rounded-full border"
+                      style={{ borderColor: activeColor }}
+                    />
+                  </div>
+                )}
 
                 {events.map((event) => {
                   const isSelected = event.id === selectedEventId;
@@ -131,6 +253,13 @@ export function TimelineBar({
                   return (
                     <button
                       key={event.id}
+                      ref={(el) => {
+                        if (el) {
+                          itemRefs.current.set(event.id, el);
+                        } else {
+                          itemRefs.current.delete(event.id);
+                        }
+                      }}
                       type="button"
                       onClick={() => onSelectEvent(event.id)}
                       title={`${event.yearLabel} — ${event.title}`}
@@ -138,16 +267,18 @@ export function TimelineBar({
                       aria-current={isSelected ? 'step' : undefined}
                       className="group relative z-10 flex flex-col items-center focus:outline-none px-0.5"
                     >
+                      <span className="flex h-4 items-center justify-center">
+                        <span
+                          className={`block rounded-full border-2 border-parchment transition-transform duration-200 motion-reduce:transition-none ${
+                            isSelected
+                              ? 'h-3 w-3 scale-110'
+                              : 'h-2.5 w-2.5 group-hover:scale-125'
+                          }`}
+                          style={{ backgroundColor: eraColor }}
+                        />
+                      </span>
                       <span
-                        className={`block rounded-full border-2 border-parchment transition-transform duration-150 ${
-                          isSelected
-                            ? 'h-3.5 w-3.5 scale-110 ring-2 ring-offset-1 ring-ink/30'
-                            : 'h-2.5 w-2.5 group-hover:scale-125'
-                        }`}
-                        style={{ backgroundColor: eraColor }}
-                      />
-                      <span
-                        className={`mt-1 text-[10px] leading-none transition-colors ${
+                        className={`mt-0.5 text-[10px] leading-none transition-colors duration-200 ${
                           isSelected
                             ? 'font-bold text-ink'
                             : 'text-ink-muted group-hover:text-ink hidden md:inline'
@@ -166,11 +297,11 @@ export function TimelineBar({
             type="button"
             onClick={() => handleStep(1)}
             disabled={events.length === 0}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-parchment-border bg-parchment text-ink hover:bg-parchment-surface disabled:opacity-40 transition-colors"
+            className="group inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-parchment-border bg-parchment text-ink hover:bg-parchment-surface disabled:opacity-40 transition-colors"
             aria-label="Próximo marco histórico"
             title="Próximo"
           >
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-4 h-4 transition-transform duration-150 group-hover:translate-x-0.5 group-active:translate-x-1 motion-reduce:transition-none" />
           </button>
         </div>
       </div>
